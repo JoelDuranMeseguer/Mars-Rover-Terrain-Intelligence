@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mars-rover-terrain-intelligence"
+version = "0.1.0"
+description = "Starter project for terrain segmentation, traversability scoring, and rover path planning."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Mars Rover Team" }]
+dependencies = [
+  "numpy>=1.26",
+  "pandas>=2.2",
+  "PyYAML>=6.0",
+  "matplotlib>=3.8",
+  "streamlit>=1.30"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "jupyter>=1.0"
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
