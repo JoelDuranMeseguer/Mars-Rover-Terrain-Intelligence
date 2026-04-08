@@ -1,0 +1,4 @@
+planner:
+  algorithm: astar
+  diagonal_movement: false
+  hazard_weight: 2.0

@@ -1,56 +1,37 @@
 # Mars Rover Terrain Intelligence
 
-Mars Rover Terrain Intelligence is a lightweight starter repository for building terrain understanding and autonomous navigation workflows from rover imagery.
+A clean project template for terrain segmentation, traversability analysis, and path planning.
 
-## Project goals
-- Load and manage rover image/label datasets.
-- Train terrain segmentation models.
-- Run inference on new terrain images.
-- Estimate traversability scores from model outputs.
-- Plan safe paths across segmented terrain.
-- Visualize intermediate and final results.
+## Repository layout
 
-## Project structure
 ```text
-src/
-  data/            # Dataset loading and dataset utilities
-  features/        # Preprocessing and feature engineering
-  models/          # Training, inference, and evaluation logic
-  navigation/      # Traversability and path-planning components
-  visualization/   # Plotting and rendering helpers
-  utils/           # Shared utilities
-notebooks/         # EDA and experimentation notebooks
-app/               # Streamlit app scaffold
-tests/             # Placeholder unit/integration tests
-configs/           # YAML config files
-data/
-  raw/             # Raw source data
-  interim/         # Intermediate outputs
-  processed/       # Model-ready processed datasets
-models/            # Saved model artifacts
-reports/figures/   # Generated figures and plots
+mars-rover-terrain-intelligence/
+├── README.md
+├── LICENSE
+├── .gitignore
+├── pyproject.toml
+├── Makefile
+├── requirements.txt
+├── .pre-commit-config.yaml
+├── configs/
+├── data/
+├── notebooks/
+├── models/
+├── reports/
+├── app/
+├── src/mrti/
+├── scripts/
+└── tests/
 ```
 
-## Quickstart
-1. Create and activate a virtual environment.
-2. Install dependencies:
-   ```bash
-   pip install -e .[dev]
-   ```
-3. Run placeholder tests:
-   ```bash
-   pytest -q
-   ```
-4. Launch the Streamlit scaffold:
-   ```bash
-   streamlit run app/streamlit_app.py
-   ```
+## Quick start
 
-## Typical workflow
-- Update `configs/base.yaml` for paths and training settings.
-- Explore data in `notebooks/01_eda.ipynb`.
-- Train model with `python scripts/train_segmentation.py --config configs/base.yaml`.
-- Run inference with `python scripts/run_inference.py --config configs/base.yaml --image path/to/image.png`.
+```bash
+python -m pip install -e .
+pytest -q
+streamlit run app/Home.py
+```
 
-## Notes
-This scaffold intentionally keeps implementations simple so you can extend each module iteratively.
+## Data placement
+
+Put downloaded datasets in `data/raw/` (for example `data/raw/ai4mars-dataset-merged-0.6/`).
