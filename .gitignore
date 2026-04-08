@@ -22,8 +22,10 @@ dist/
 # Environment variables
 .env
 
-# Data and models (optional tracking policy)
-# data/raw/
+# Data and models
+data/raw/
+data/processed/
+
 # models/
 
 # OS/editor files
