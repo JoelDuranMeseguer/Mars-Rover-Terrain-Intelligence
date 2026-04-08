@@ -10,7 +10,7 @@ test:
 	pytest -q
 
 prepare:
-	$(PYTHON) scripts/prepare_data.py --config $(CONFIG)
+	$(PYTHON) scripts/prepare_data.py --raw-root data/raw/AI4Mars --manifest data/processed/manifests/msl_ncam_v1.csv --out-dir data/processed/msl_ncam_v1 --seed 42
 
 train:
 	$(PYTHON) scripts/train.py --config configs/train_deeplab.yaml
