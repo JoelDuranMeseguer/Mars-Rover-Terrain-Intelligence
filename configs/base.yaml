@@ -1,0 +1,8 @@
+project_name: mrti
+seed: 42
+paths:
+  raw_data: data/raw
+  interim_data: data/interim
+  processed_data: data/processed
+  checkpoints: models/checkpoints
+  exports: models/exports

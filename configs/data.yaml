@@ -1,0 +1,5 @@
+data:
+  dataset_name: ai4mars
+  image_glob: "**/*.png"
+  mask_glob: "**/*mask*.png"
+  split_ratios: [0.7, 0.2, 0.1]
