@@ -23,6 +23,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--max-train-batches", type=int, default=1)
     parser.add_argument("--max-val-batches", type=int, default=1)
+    parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
 
 
@@ -91,6 +92,10 @@ def update_iou_stats(
 
 def main() -> None:
     args = parse_args()
+    torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
+    print("Seed:", args.seed)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Device:", device)
