@@ -36,6 +36,25 @@ def build_model(num_classes: int) -> nn.Module:
     )
 
 
+def update_iou_stats(
+    preds: torch.Tensor,
+    targets: torch.Tensor,
+    intersections: torch.Tensor,
+    unions: torch.Tensor,
+    num_classes: int,
+    ignore_index: int = 255,
+) -> None:
+    valid = targets != ignore_index
+    preds = preds[valid]
+    targets = targets[valid]
+
+    for cls in range(num_classes):
+        pred_cls = preds == cls
+        target_cls = targets == cls
+        intersections[cls] += (pred_cls & target_cls).sum().item()
+        unions[cls] += (pred_cls | target_cls).sum().item()
+
+
 def main() -> None:
     args = parse_args()
 
@@ -79,6 +98,8 @@ def main() -> None:
 
         model.eval()
         val_losses = []
+        iou_intersections = torch.zeros(args.num_classes, dtype=torch.float64)
+        iou_unions = torch.zeros(args.num_classes, dtype=torch.float64)
         with torch.no_grad():
             for batch_idx, batch in enumerate(val_loader):
                 images = batch["image"].to(device)
@@ -87,6 +108,14 @@ def main() -> None:
                 logits = model(images)
                 loss = criterion(logits, masks)
                 val_losses.append(loss.item())
+                preds = logits.argmax(dim=1)
+                update_iou_stats(
+                    preds=preds,
+                    targets=masks,
+                    intersections=iou_intersections,
+                    unions=iou_unions,
+                    num_classes=args.num_classes,
+                )
 
                 print(
                     f"[epoch {epoch + 1}] val batch {batch_idx + 1} "
@@ -98,9 +127,19 @@ def main() -> None:
 
         train_mean = sum(train_losses) / max(len(train_losses), 1)
         val_mean = sum(val_losses) / max(len(val_losses), 1)
+        iou_per_class = []
+        for cls in range(args.num_classes):
+            union = iou_unions[cls].item()
+            iou = iou_intersections[cls].item() / union if union > 0 else 0.0
+            iou_per_class.append(iou)
+        mean_iou = sum(iou_per_class) / max(len(iou_per_class), 1)
+        iou_text = ", ".join(
+            [f"class_{cls}_iou={iou_per_class[cls]:.4f}" for cls in range(args.num_classes)]
+        )
         print(
             f"Epoch {epoch + 1}/{args.epochs} summary -> "
-            f"train_loss={train_mean:.4f}, val_loss={val_mean:.4f}"
+            f"train_loss={train_mean:.4f}, val_loss={val_mean:.4f}, "
+            f"{iou_text}, mean_iou={mean_iou:.4f}"
         )
 
 
