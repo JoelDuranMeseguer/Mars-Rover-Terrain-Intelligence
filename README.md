@@ -96,3 +96,23 @@ Quick CLI sanity check:
 python scripts/check_dataset.py --data-root data/processed/msl_ncam_v1 --split train --num-samples 3
 ```
 
+
+## Error común: `No module named "mrti"`
+
+Este repo usa estructura `src/`, así que `mrti` vive dentro de `src/mrti`.
+Si ejecutas scripts sin instalar el proyecto, Python no siempre encuentra ese paquete.
+
+Pasos recomendados:
+
+1. Desde la raíz del repo, crea/activa tu entorno virtual.
+2. Instala el proyecto en editable:
+   ```bash
+   python -m pip install -e .
+   ```
+3. Verifica import:
+   ```bash
+   python -c "import mrti; print(mrti.__file__)"
+   ```
+
+Para el script `scripts/check_dataset.py` también se añadió un fallback pequeño que agrega `src/` al `sys.path` cuando lo ejecutas directamente.
+
