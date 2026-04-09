@@ -74,3 +74,45 @@ data/processed/msl_ncam_v1/
 ```
 
 `prepare_data.py` validates image/mask existence, copies only valid pairs, renames by sample id, creates 80/10/10 splits, and writes `index.csv`.
+
+## PyTorch dataset layer (index.csv + splits)
+
+Use `AI4MarsSegmentationDataset` to load one split from the prepared folder:
+
+```python
+from mrti.data import AI4MarsSegmentationDataset
+
+train_ds = AI4MarsSegmentationDataset(
+    dataset_root="data/processed/msl_ncam_v1",
+    split="train",
+)
+sample = train_ds[0]
+print(sample["id"], sample["image"].shape, sample["mask"].shape)
+```
+
+Quick CLI sanity check:
+
+```bash
+python scripts/check_dataset.py --data-root data/processed/msl_ncam_v1 --split train --num-samples 3
+```
+
+
+## Error común: `No module named "mrti"`
+
+Este repo usa estructura `src/`, así que `mrti` vive dentro de `src/mrti`.
+Si ejecutas scripts sin instalar el proyecto, Python no siempre encuentra ese paquete.
+
+Pasos recomendados:
+
+1. Desde la raíz del repo, crea/activa tu entorno virtual.
+2. Instala el proyecto en editable:
+   ```bash
+   python -m pip install -e .
+   ```
+3. Verifica import:
+   ```bash
+   python -c "import mrti; print(mrti.__file__)"
+   ```
+
+Para el script `scripts/check_dataset.py` también se añadió un fallback pequeño que agrega `src/` al `sys.path` cuando lo ejecutas directamente.
+
