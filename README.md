@@ -74,3 +74,25 @@ data/processed/msl_ncam_v1/
 ```
 
 `prepare_data.py` validates image/mask existence, copies only valid pairs, renames by sample id, creates 80/10/10 splits, and writes `index.csv`.
+
+## PyTorch dataset layer (index.csv + splits)
+
+Use `AI4MarsSegmentationDataset` to load one split from the prepared folder:
+
+```python
+from mrti.data import AI4MarsSegmentationDataset
+
+train_ds = AI4MarsSegmentationDataset(
+    dataset_root="data/processed/msl_ncam_v1",
+    split="train",
+)
+sample = train_ds[0]
+print(sample["id"], sample["image"].shape, sample["mask"].shape)
+```
+
+Quick CLI sanity check:
+
+```bash
+python scripts/check_dataset.py --data-root data/processed/msl_ncam_v1 --split train --num-samples 3
+```
+
