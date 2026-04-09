@@ -16,7 +16,7 @@ from mrti.data.dataset import AI4MarsSegmentationDataset
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Simple baseline training for segmentation")
     parser.add_argument("--dataset-root", type=Path, default=Path("data/processed/msl_ncam_v1"))
-    parser.add_argument("--num-classes", type=int, default=5)
+    parser.add_argument("--num-classes", type=int, default=4)
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--lr", type=float, default=1e-3)
