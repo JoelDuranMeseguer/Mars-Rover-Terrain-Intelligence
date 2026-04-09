@@ -23,8 +23,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--max-train-batches", type=int, default=1)
     parser.add_argument("--max-val-batches", type=int, default=1)
+    parser.add_argument("--model", type=str, choices=["cnn", "unet"], default="unet")
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
+
+
+class FlatCNN(nn.Module):
+    def __init__(self, num_classes: int) -> None:
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Conv2d(3, 16, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(16, 32, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(32, num_classes, kernel_size=1),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)
 
 
 class ConvBlock(nn.Module):
@@ -67,7 +83,9 @@ class SmallUNet(nn.Module):
         return self.classifier(dec1)
 
 
-def build_model(num_classes: int) -> nn.Module:
+def build_model(model_name: str, num_classes: int) -> nn.Module:
+    if model_name == "cnn":
+        return FlatCNN(num_classes=num_classes)
     return SmallUNet(num_classes=num_classes)
 
 
@@ -96,6 +114,7 @@ def main() -> None:
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
     print("Seed:", args.seed)
+    print("Model:", args.model)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Device:", device)
@@ -108,7 +127,7 @@ def main() -> None:
 
     print(f"Train samples: {len(train_ds)} | Val samples: {len(val_ds)}")
 
-    model = build_model(args.num_classes).to(device)
+    model = build_model(args.model, args.num_classes).to(device)
     criterion = nn.CrossEntropyLoss(ignore_index=255)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
