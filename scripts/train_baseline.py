@@ -7,6 +7,7 @@ import argparse
 from pathlib import Path
 
 import torch
+import torch.nn.functional as F
 from torch import nn
 from torch.utils.data import DataLoader
 
@@ -25,15 +26,48 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+class ConvBlock(nn.Module):
+    def __init__(self, in_channels: int, out_channels: int) -> None:
+        super().__init__()
+        self.block = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.block(x)
+
+
+class SmallUNet(nn.Module):
+    def __init__(self, num_classes: int) -> None:
+        super().__init__()
+        self.enc1 = ConvBlock(3, 16)
+        self.enc2 = ConvBlock(16, 32)
+        self.bottleneck = ConvBlock(32, 64)
+
+        self.dec2 = ConvBlock(64 + 32, 32)
+        self.dec1 = ConvBlock(32 + 16, 16)
+
+        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.classifier = nn.Conv2d(16, num_classes, kernel_size=1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        enc1 = self.enc1(x)
+        enc2 = self.enc2(self.pool(enc1))
+        bottleneck = self.bottleneck(self.pool(enc2))
+
+        up2 = F.interpolate(bottleneck, size=enc2.shape[-2:], mode="bilinear", align_corners=False)
+        dec2 = self.dec2(torch.cat([up2, enc2], dim=1))
+
+        up1 = F.interpolate(dec2, size=enc1.shape[-2:], mode="bilinear", align_corners=False)
+        dec1 = self.dec1(torch.cat([up1, enc1], dim=1))
+        return self.classifier(dec1)
+
+
 def build_model(num_classes: int) -> nn.Module:
-    # CNN pequeña: logits por pixel con la misma resolución de entrada.
-    return nn.Sequential(
-        nn.Conv2d(3, 16, kernel_size=3, padding=1),
-        nn.ReLU(inplace=True),
-        nn.Conv2d(16, 32, kernel_size=3, padding=1),
-        nn.ReLU(inplace=True),
-        nn.Conv2d(32, num_classes, kernel_size=1),
-    )
+    return SmallUNet(num_classes=num_classes)
 
 
 def update_iou_stats(
