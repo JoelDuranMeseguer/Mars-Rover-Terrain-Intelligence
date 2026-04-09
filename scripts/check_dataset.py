@@ -1,54 +1,33 @@
-"""Quick sanity check for AI4Mars PyTorch dataset loading."""
+"""Simple sanity check for the AI4Mars dataset."""
 
-from __future__ import annotations
-
-import argparse
-import sys
 from pathlib import Path
 
-
-# Allow running this script directly without `pip install -e .`
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SRC_DIR = REPO_ROOT / "src"
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
+from mrti.data.dataset import AI4MarsSegmentationDataset
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Sanity check AI4MarsSegmentationDataset")
-    parser.add_argument(
-        "--data-root",
-        type=Path,
-        default=Path("data/processed/msl_ncam_v1"),
-        help="Folder containing index.csv, splits/, images/ and masks/",
+data_root = Path("/home/joel/Documentos/Mars-Rover-Terrain-Intelligence/data/processed/msl_ncam_v1")
+split = "train"
+num_samples = 3
+
+dataset = AI4MarsSegmentationDataset(
+    dataset_root=data_root,
+    split=split,
+)
+
+print("Dataset root:", data_root)
+print("Split:", split)
+print("Samples:", len(dataset))
+
+n = min(num_samples, len(dataset))
+
+for i in range(n):
+    sample = dataset[i]
+    image = sample["image"]
+    mask = sample["mask"]
+    sample_id = sample["id"]
+
+    print(
+        f"[{i}] id={sample_id} "
+        f"image_shape={tuple(image.shape)} image_dtype={image.dtype} "
+        f"mask_shape={tuple(mask.shape)} mask_dtype={mask.dtype}"
     )
-    parser.add_argument("--split", choices=["train", "val", "test"], default="train")
-    parser.add_argument("--num-samples", type=int, default=3, help="How many samples to print")
-    return parser.parse_args()
-
-
-def main() -> None:
-    args = parse_args()
-
-    from mrti.data import AI4MarsSegmentationDataset
-
-    dataset = AI4MarsSegmentationDataset(dataset_root=args.data_root, split=args.split)
-
-    print(f"Dataset root: {args.data_root}")
-    print(f"Split: {args.split}")
-    print(f"Samples: {len(dataset)}")
-
-    n = min(args.num_samples, len(dataset))
-    for idx in range(n):
-        sample = dataset[idx]
-        image = sample["image"]
-        mask = sample["mask"]
-        sample_id = sample["id"]
-        print(
-            f"[{idx}] id={sample_id} image_shape={tuple(image.shape)} image_dtype={image.dtype} "
-            f"mask_shape={tuple(mask.shape)} mask_dtype={mask.dtype}"
-        )
-
-
-if __name__ == "__main__":
-    main()
