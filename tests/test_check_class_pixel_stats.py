@@ -1,7 +1,5 @@
 """Tests for scripts/check_class_pixel_stats.py."""
 
-from __future__ import annotations
-
 import csv
 import subprocess
 import sys

@@ -7,8 +7,6 @@ Example:
         --num-samples 4
 """
 
-from __future__ import annotations
-
 import argparse
 from pathlib import Path
 
@@ -54,40 +52,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def image_tensor_to_uint8(image: object) -> np.ndarray:
-    image_np = image.permute(1, 2, 0).cpu().numpy()
-    image_np = np.clip(image_np * 255.0, 0, 255).astype(np.uint8)
-    return image_np
-
-
-def colorize_mask(mask: object) -> np.ndarray:
-    mask_np = mask.cpu().numpy().astype(np.int64)
-
-    max_value = int(mask_np.max())
-    if max_value >= len(DEFAULT_COLORS):
-        extra = max_value + 1 - len(DEFAULT_COLORS)
-        repeated = np.tile(DEFAULT_COLORS[-1], (extra, 1))
-        colors = np.vstack([DEFAULT_COLORS, repeated])
-    else:
-        colors = DEFAULT_COLORS
-
-    return colors[mask_np]
-
-
-def blend_overlay(image: np.ndarray, mask_rgb: np.ndarray, alpha: float = 0.4) -> np.ndarray:
-    overlay = ((1.0 - alpha) * image + alpha * mask_rgb).astype(np.uint8)
-    return overlay
-
-
-def save_preview(sample_id: str, image: np.ndarray, mask_rgb: np.ndarray, output_path: Path, with_overlay: bool) -> None:
-    panels = [image, mask_rgb]
-    if with_overlay:
-        panels.append(blend_overlay(image, mask_rgb))
-
-    preview = np.concatenate(panels, axis=1)
-    Image.fromarray(preview).save(output_path)
-
-
 def main() -> None:
     args = parse_args()
 
@@ -103,19 +67,34 @@ def main() -> None:
     for i in range(n):
         sample = dataset[i]
         sample_id = str(sample["id"])
-        image_uint8 = image_tensor_to_uint8(sample["image"])
-        mask_rgb = colorize_mask(sample["mask"])
 
+        # Imagen tensor (C,H,W, 0..1) -> uint8 (H,W,C)
+        image_uint8 = sample["image"].permute(1, 2, 0).cpu().numpy()
+        image_uint8 = np.clip(image_uint8 * 255.0, 0, 255).astype(np.uint8)
+
+        # Máscara -> ids enteros
+        mask_ids = sample["mask"].cpu().numpy().astype(np.int64)
+
+        # Si aparece un id mayor que la paleta base, repetimos el último color.
+        max_value = int(mask_ids.max())
+        if max_value >= len(DEFAULT_COLORS):
+            extra = max_value + 1 - len(DEFAULT_COLORS)
+            repeated = np.tile(DEFAULT_COLORS[-1], (extra, 1))
+            colors = np.vstack([DEFAULT_COLORS, repeated])
+        else:
+            colors = DEFAULT_COLORS
+
+        mask_rgb = colors[mask_ids]
+
+        panels = [image_uint8, mask_rgb]
+        if not args.no_overlay:
+            overlay = ((1.0 - 0.4) * image_uint8 + 0.4 * mask_rgb).astype(np.uint8)
+            panels.append(overlay)
+
+        preview = np.concatenate(panels, axis=1)
         output_name = f"{i:02d}_{sample_id}.png"
         output_path = args.output_dir / output_name
-
-        save_preview(
-            sample_id=sample_id,
-            image=image_uint8,
-            mask_rgb=mask_rgb,
-            output_path=output_path,
-            with_overlay=not args.no_overlay,
-        )
+        Image.fromarray(preview).save(output_path)
 
         print(
             f"[{i}] id={sample_id} "
