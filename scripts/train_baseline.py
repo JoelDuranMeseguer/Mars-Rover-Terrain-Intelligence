@@ -158,6 +158,8 @@ def main() -> None:
         val_losses = []
         iou_intersections = torch.zeros(args.num_classes, dtype=torch.float64)
         iou_unions = torch.zeros(args.num_classes, dtype=torch.float64)
+        target_pixel_counts = torch.zeros(args.num_classes, dtype=torch.float64)
+        pred_pixel_counts = torch.zeros(args.num_classes, dtype=torch.float64)
         with torch.no_grad():
             for batch_idx, batch in enumerate(val_loader):
                 images = batch["image"].to(device)
@@ -174,6 +176,12 @@ def main() -> None:
                     unions=iou_unions,
                     num_classes=args.num_classes,
                 )
+                valid = masks != 255
+                valid_targets = masks[valid]
+                valid_preds = preds[valid]
+                for cls in range(args.num_classes):
+                    target_pixel_counts[cls] += (valid_targets == cls).sum().item()
+                    pred_pixel_counts[cls] += (valid_preds == cls).sum().item()
 
                 print(
                     f"[epoch {epoch + 1}] val batch {batch_idx + 1} "
@@ -199,6 +207,11 @@ def main() -> None:
             f"train_loss={train_mean:.4f}, val_loss={val_mean:.4f}, "
             f"{iou_text}, mean_iou={mean_iou:.4f}"
         )
+        for cls in range(args.num_classes):
+            print(
+                f"class_{cls} target_pixels={int(target_pixel_counts[cls].item())} "
+                f"predicted_pixels={int(pred_pixel_counts[cls].item())}"
+            )
 
 
 if __name__ == "__main__":
