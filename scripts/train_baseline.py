@@ -140,6 +140,7 @@ def main() -> None:
         torch.cuda.manual_seed_all(args.seed)
     print("Seed:", args.seed)
     print("Model:", args.model)
+    print("Use class weights:", args.use_class_weights)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Device:", device)
@@ -156,7 +157,11 @@ def main() -> None:
     class_weights = None
     if args.use_class_weights:
         class_weights = compute_class_weights(train_ds, args.num_classes).to(device)
-        print("Class weights:", [round(x, 6) for x in class_weights.detach().cpu().tolist()])
+        class_weights_list = [round(x, 6) for x in class_weights.detach().cpu().tolist()]
+        print("Class weights mode: enabled")
+        print("Computed class weights:", class_weights_list)
+    else:
+        print("Class weights mode: disabled (uniform CE)")
     criterion = nn.CrossEntropyLoss(weight=class_weights, ignore_index=255)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
