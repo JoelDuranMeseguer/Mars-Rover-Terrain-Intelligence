@@ -13,6 +13,8 @@ from torch.utils.data import DataLoader
 
 from mrti.data.dataset import AI4MarsSegmentationDataset
 
+FIXED_CLASS_WEIGHTS = (0.668995, 0.504918, 2.050571, 27.003855)
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Simple baseline training for segmentation")
@@ -109,30 +111,6 @@ def update_iou_stats(
         unions[cls] += (pred_cls | target_cls).sum().item()
 
 
-def compute_class_weights(
-    dataset: AI4MarsSegmentationDataset,
-    num_classes: int,
-    ignore_index: int = 255,
-) -> torch.Tensor:
-    class_counts = torch.zeros(num_classes, dtype=torch.float64)
-    for sample in dataset:
-        mask = sample["mask"]
-        valid = mask != ignore_index
-        valid_mask = mask[valid]
-        for cls in range(num_classes):
-            class_counts[cls] += (valid_mask == cls).sum().item()
-
-    total_valid = class_counts.sum().item()
-    weights = torch.zeros(num_classes, dtype=torch.float32)
-    for cls in range(num_classes):
-        count = class_counts[cls].item()
-        if count > 0:
-            weights[cls] = total_valid / (num_classes * count)
-        else:
-            weights[cls] = 0.0
-    return weights
-
-
 def main() -> None:
     args = parse_args()
     torch.manual_seed(args.seed)
@@ -156,10 +134,15 @@ def main() -> None:
     model = build_model(args.model, args.num_classes).to(device)
     class_weights = None
     if args.use_class_weights:
-        class_weights = compute_class_weights(train_ds, args.num_classes).to(device)
+        class_weights = torch.tensor(FIXED_CLASS_WEIGHTS, dtype=torch.float32, device=device)
+        if len(class_weights) != args.num_classes:
+            raise ValueError(
+                f"FIXED_CLASS_WEIGHTS expects {len(class_weights)} classes but got "
+                f"--num-classes={args.num_classes}"
+            )
         class_weights_list = [round(x, 6) for x in class_weights.detach().cpu().tolist()]
         print("Class weights mode: enabled")
-        print("Computed class weights:", class_weights_list)
+        print("Using fixed class weights:", class_weights_list)
     else:
         print("Class weights mode: disabled (uniform CE)")
     criterion = nn.CrossEntropyLoss(weight=class_weights, ignore_index=255)
