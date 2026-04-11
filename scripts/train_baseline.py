@@ -150,6 +150,8 @@ def main() -> None:
     best_epoch = -1
     best_mean_iou = -1.0
     best_iou_per_class = [0.0 for _ in range(args.num_classes)]
+    best_checkpoint_path = Path("checkpoints") / "baseline_best.pt"
+    best_checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
 
     for epoch in range(args.epochs):
         model.train()
@@ -231,6 +233,20 @@ def main() -> None:
             best_epoch = epoch + 1
             best_mean_iou = mean_iou
             best_iou_per_class = iou_per_class.copy()
+            torch.save(
+                {
+                    "epoch": best_epoch,
+                    "model_state_dict": model.state_dict(),
+                    "best_mean_iou": best_mean_iou,
+                    "model_name": args.model,
+                    "use_class_weights": args.use_class_weights,
+                },
+                best_checkpoint_path,
+            )
+            print(
+                f"Saved new best model checkpoint to {best_checkpoint_path} "
+                f"(epoch={best_epoch}, mean_iou={best_mean_iou:.4f})"
+            )
         for cls in range(args.num_classes):
             print(
                 f"class_{cls} target_pixels={int(target_pixel_counts[cls].item())} "
@@ -244,6 +260,7 @@ def main() -> None:
         f"Best validation epoch -> best_epoch={best_epoch}, "
         f"best_mean_iou={best_mean_iou:.4f}, {best_iou_text}"
     )
+    print(f"Best checkpoint path: {best_checkpoint_path}")
 
 
 if __name__ == "__main__":
