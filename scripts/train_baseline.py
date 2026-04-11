@@ -147,6 +147,9 @@ def main() -> None:
         print("Class weights mode: disabled (uniform CE)")
     criterion = nn.CrossEntropyLoss(weight=class_weights, ignore_index=255)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    best_epoch = -1
+    best_mean_iou = -1.0
+    best_iou_per_class = [0.0 for _ in range(args.num_classes)]
 
     for epoch in range(args.epochs):
         model.train()
@@ -224,11 +227,23 @@ def main() -> None:
             f"train_loss={train_mean:.4f}, val_loss={val_mean:.4f}, "
             f"{iou_text}, mean_iou={mean_iou:.4f}"
         )
+        if mean_iou > best_mean_iou:
+            best_epoch = epoch + 1
+            best_mean_iou = mean_iou
+            best_iou_per_class = iou_per_class.copy()
         for cls in range(args.num_classes):
             print(
                 f"class_{cls} target_pixels={int(target_pixel_counts[cls].item())} "
                 f"predicted_pixels={int(pred_pixel_counts[cls].item())}"
             )
+
+    best_iou_text = ", ".join(
+        [f"class_{cls}_iou={best_iou_per_class[cls]:.4f}" for cls in range(args.num_classes)]
+    )
+    print(
+        f"Best validation epoch -> best_epoch={best_epoch}, "
+        f"best_mean_iou={best_mean_iou:.4f}, {best_iou_text}"
+    )
 
 
 if __name__ == "__main__":
