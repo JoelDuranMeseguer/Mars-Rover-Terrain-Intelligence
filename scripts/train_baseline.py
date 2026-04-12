@@ -51,8 +51,10 @@ class ConvBlock(nn.Module):
         super().__init__()
         self.block = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True),
             nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True),
         )
 
@@ -63,22 +65,28 @@ class ConvBlock(nn.Module):
 class SmallUNet(nn.Module):
     def __init__(self, num_classes: int) -> None:
         super().__init__()
-        self.enc1 = ConvBlock(3, 16)
-        self.enc2 = ConvBlock(16, 32)
-        self.bottleneck = ConvBlock(32, 64)
+        self.enc1 = ConvBlock(3, 32)
+        self.enc2 = ConvBlock(32, 64)
+        self.enc3 = ConvBlock(64, 128)
+        self.bottleneck = ConvBlock(128, 256)
 
-        self.dec2 = ConvBlock(64 + 32, 32)
-        self.dec1 = ConvBlock(32 + 16, 16)
+        self.dec3 = ConvBlock(256 + 128, 128)
+        self.dec2 = ConvBlock(128 + 64, 64)
+        self.dec1 = ConvBlock(64 + 32, 32)
 
         self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
-        self.classifier = nn.Conv2d(16, num_classes, kernel_size=1)
+        self.classifier = nn.Conv2d(32, num_classes, kernel_size=1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         enc1 = self.enc1(x)
         enc2 = self.enc2(self.pool(enc1))
-        bottleneck = self.bottleneck(self.pool(enc2))
+        enc3 = self.enc3(self.pool(enc2))
+        bottleneck = self.bottleneck(self.pool(enc3))
 
-        up2 = F.interpolate(bottleneck, size=enc2.shape[-2:], mode="bilinear", align_corners=False)
+        up3 = F.interpolate(bottleneck, size=enc3.shape[-2:], mode="bilinear", align_corners=False)
+        dec3 = self.dec3(torch.cat([up3, enc3], dim=1))
+
+        up2 = F.interpolate(dec3, size=enc2.shape[-2:], mode="bilinear", align_corners=False)
         dec2 = self.dec2(torch.cat([up2, enc2], dim=1))
 
         up1 = F.interpolate(dec2, size=enc1.shape[-2:], mode="bilinear", align_corners=False)
