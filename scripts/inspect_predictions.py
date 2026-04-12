@@ -65,13 +65,28 @@ def main() -> None:
     print("Checkpoint:", args.checkpoint)
 
     checkpoint = torch.load(args.checkpoint, map_location=device)
-    checkpoint_model_name = checkpoint.get("model_name")
-    model_name = checkpoint_model_name if checkpoint_model_name is not None else args.model
-    print("Model:", model_name)
+    checkpoint_epoch = checkpoint["epoch"]
+    checkpoint_best_mean_iou = checkpoint["best_mean_iou"]
+    checkpoint_model_name = checkpoint["model_name"]
+    checkpoint_use_class_weights = checkpoint["use_class_weights"]
+    print(
+        "Checkpoint info:",
+        {
+            "epoch": checkpoint_epoch,
+            "best_mean_iou": round(float(checkpoint_best_mean_iou), 6),
+            "model_name": checkpoint_model_name,
+            "use_class_weights": checkpoint_use_class_weights,
+        },
+    )
+    if args.model != checkpoint_model_name:
+        raise ValueError(
+            f"--model ({args.model}) does not match checkpoint model_name "
+            f"({checkpoint_model_name})."
+        )
+    print("Model:", checkpoint_model_name)
 
-    model = build_model(model_name=model_name, num_classes=args.num_classes).to(device)
-    model_state_dict = checkpoint.get("model_state_dict", checkpoint)
-    model.load_state_dict(model_state_dict)
+    model = build_model(model_name=checkpoint_model_name, num_classes=args.num_classes).to(device)
+    model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
 
     val_ds = AI4MarsSegmentationDataset(dataset_root=args.dataset_root, split="val")
