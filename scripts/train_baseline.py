@@ -28,6 +28,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", type=str, choices=["cnn", "unet"], default="unet")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--use-class-weights", action="store_true")
+    parser.add_argument("--use-train-augmentations", action="store_true")
     return parser.parse_args()
 
 
@@ -127,11 +128,16 @@ def main() -> None:
     print("Seed:", args.seed)
     print("Model:", args.model)
     print("Use class weights:", args.use_class_weights)
+    print("Use train augmentations:", args.use_train_augmentations)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Device:", device)
 
-    train_ds = AI4MarsSegmentationDataset(dataset_root=args.dataset_root, split="train")
+    train_ds = AI4MarsSegmentationDataset(
+        dataset_root=args.dataset_root,
+        split="train",
+        use_augmentations=args.use_train_augmentations,
+    )
     val_ds = AI4MarsSegmentationDataset(dataset_root=args.dataset_root, split="val")
 
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)

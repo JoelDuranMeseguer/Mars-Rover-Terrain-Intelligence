@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Callable
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageEnhance
 import torch
 from torch.utils.data import Dataset
 
@@ -16,6 +16,7 @@ class AI4MarsSegmentationDataset(Dataset):
         dataset_root: str | Path,
         split: str = "train",
         transform: Callable | None = None,
+        use_augmentations: bool = False,
     ) -> None:
 
         if split not in {"train", "val", "test"}:
@@ -24,6 +25,7 @@ class AI4MarsSegmentationDataset(Dataset):
         self.dataset_root = Path(dataset_root)
         self.split = split
         self.transform = transform
+        self.use_augmentations = use_augmentations and split == "train"
 
         self.index_path = self.dataset_root / "index.csv"
         self.split_path = self.dataset_root / "splits" / f"{split}.txt"
@@ -115,6 +117,9 @@ class AI4MarsSegmentationDataset(Dataset):
         image = Image.open(image_path).convert("RGB")
         mask = Image.open(mask_path)
 
+        if self.use_augmentations:
+            image, mask = self._apply_train_augmentations(image, mask)
+
         if self.transform is not None:
             image, mask = self.transform(image, mask)
         else:
@@ -126,6 +131,21 @@ class AI4MarsSegmentationDataset(Dataset):
             "mask": mask,
             "id": sample_id,
         }
+
+    def _apply_train_augmentations(
+        self,
+        image: Image.Image,
+        mask: Image.Image,
+    ) -> tuple[Image.Image, Image.Image]:
+        if torch.rand(1).item() < 0.5:
+            image = image.transpose(Image.FLIP_LEFT_RIGHT)
+            mask = mask.transpose(Image.FLIP_LEFT_RIGHT)
+
+        brightness_factor = 0.9 + 0.2 * torch.rand(1).item()
+        contrast_factor = 0.9 + 0.2 * torch.rand(1).item()
+        image = ImageEnhance.Brightness(image).enhance(brightness_factor)
+        image = ImageEnhance.Contrast(image).enhance(contrast_factor)
+        return image, mask
 
     def _image_to_tensor(self, image: Image.Image) -> torch.Tensor:
         image = np.array(image, dtype=np.float32) / 255.0
