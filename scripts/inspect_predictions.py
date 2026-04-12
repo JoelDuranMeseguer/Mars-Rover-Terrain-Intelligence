@@ -16,9 +16,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dataset-root", type=Path, default=Path("data/processed/msl_ncam_v1"))
     parser.add_argument("--model", type=str, choices=["cnn", "unet"], default="unet")
     parser.add_argument("--num-classes", type=int, default=4)
-    parser.add_argument("--checkpoint", type=Path, default=None)
+    parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--num-samples", type=int, default=4)
-    parser.add_argument("--output-dir", type=Path, default=Path("artifacts/inspect_predictions"))
+    parser.add_argument("--output-dir", type=Path, default=Path("outputs/predictions"))
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
 
@@ -62,13 +62,16 @@ def main() -> None:
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Device:", device)
-    print("Model:", args.model)
-    print("Checkpoint:", args.checkpoint if args.checkpoint is not None else "None (random weights)")
+    print("Checkpoint:", args.checkpoint)
 
-    model = build_model(model_name=args.model, num_classes=args.num_classes).to(device)
-    if args.checkpoint is not None:
-        state = torch.load(args.checkpoint, map_location=device)
-        model.load_state_dict(state)
+    checkpoint = torch.load(args.checkpoint, map_location=device)
+    checkpoint_model_name = checkpoint.get("model_name")
+    model_name = checkpoint_model_name if checkpoint_model_name is not None else args.model
+    print("Model:", model_name)
+
+    model = build_model(model_name=model_name, num_classes=args.num_classes).to(device)
+    model_state_dict = checkpoint.get("model_state_dict", checkpoint)
+    model.load_state_dict(model_state_dict)
     model.eval()
 
     val_ds = AI4MarsSegmentationDataset(dataset_root=args.dataset_root, split="val")
