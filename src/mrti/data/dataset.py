@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Callable
 
 import numpy as np
-from PIL import Image, ImageEnhance
+from PIL import Image
 import torch
 from torch.utils.data import Dataset
 
@@ -140,11 +140,6 @@ class AI4MarsSegmentationDataset(Dataset):
         if torch.rand(1).item() < 0.5:
             image = image.transpose(Image.FLIP_LEFT_RIGHT)
             mask = mask.transpose(Image.FLIP_LEFT_RIGHT)
-
-        brightness_factor = 0.9 + 0.2 * torch.rand(1).item()
-        contrast_factor = 0.9 + 0.2 * torch.rand(1).item()
-        image = ImageEnhance.Brightness(image).enhance(brightness_factor)
-        image = ImageEnhance.Contrast(image).enhance(contrast_factor)
         return image, mask
 
     def _image_to_tensor(self, image: Image.Image) -> torch.Tensor:
