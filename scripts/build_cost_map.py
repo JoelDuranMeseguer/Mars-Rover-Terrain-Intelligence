@@ -67,10 +67,22 @@ def mask_to_cost_map(mask: np.ndarray) -> np.ndarray:
 
 
 def colorize_cost_map(cost_map: np.ndarray) -> np.ndarray:
-    # Grayscale visualization: low cost -> dark, high cost -> bright.
-    max_cost = max(CLASS_COSTS.values())
-    vis = (cost_map.astype(np.float32) / max_cost * 255.0).clip(0, 255).astype(np.uint8)
-    return np.stack([vis, vis, vis], axis=-1)
+    # Visualize traversable costs only in [1..10]:
+    # low cost -> bright, high cost -> dark.
+    min_traversable = min(CLASS_COSTS[c] for c in (0, 1, 2, 3))
+    max_traversable = max(CLASS_COSTS[c] for c in (0, 1, 2, 3))
+
+    out = np.zeros((cost_map.shape[0], cost_map.shape[1], 3), dtype=np.uint8)
+    traversable = cost_map != CLASS_COSTS[255]
+    if traversable.any():
+        c = cost_map[traversable].astype(np.float32)
+        norm = (c - min_traversable) / max(max_traversable - min_traversable, 1e-6)
+        gray = ((1.0 - norm) * 255.0).clip(0, 255).astype(np.uint8)
+        out[traversable] = np.stack([gray, gray, gray], axis=-1)
+
+    # Invalid / non-traversable (255) -> magenta
+    out[cost_map == CLASS_COSTS[255]] = np.array([255, 0, 255], dtype=np.uint8)
+    return out
 
 
 def make_triptych(image: np.ndarray, pred_mask_rgb: np.ndarray, cost_map_rgb: np.ndarray) -> np.ndarray:
