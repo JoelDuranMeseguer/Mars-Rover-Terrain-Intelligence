@@ -34,7 +34,7 @@ def update_confusion_matrix(
     ignore_index: int = IGNORE_INDEX,
 ) -> None:
     valid = (targets != ignore_index) & (targets >= 0) & (targets < num_classes)
-    if valid.sum() == 0:
+    if not valid.any():
         return
 
     preds = preds[valid].to(torch.int64)
@@ -58,6 +58,7 @@ def main() -> None:
         checkpoint_model_name = args.model
         checkpoint_num_classes = args.num_classes
         state_dict = checkpoint
+    num_classes = int(checkpoint_num_classes)
 
     dataset = AI4MarsSegmentationDataset(dataset_root=args.dataset_root, split=args.split)
     dataloader = DataLoader(
@@ -69,7 +70,7 @@ def main() -> None:
 
     model = build_model(
         model_name=str(checkpoint_model_name),
-        num_classes=int(checkpoint_num_classes),
+        num_classes=num_classes,
     ).to(device)
     model.load_state_dict(state_dict)
     model.eval()
@@ -80,7 +81,7 @@ def main() -> None:
     num_batches = 0
     correct_pixels = 0
     total_pixels = 0
-    confmat = torch.zeros((int(checkpoint_num_classes), int(checkpoint_num_classes)), dtype=torch.int64)
+    confmat = torch.zeros((num_classes, num_classes), dtype=torch.int64)
 
     with torch.no_grad():
         for batch in dataloader:
@@ -97,7 +98,7 @@ def main() -> None:
             valid = (
                 (masks != IGNORE_INDEX)
                 & (masks >= 0)
-                & (masks < int(checkpoint_num_classes))
+                & (masks < num_classes)
             )
             correct_pixels += (preds[valid] == masks[valid]).sum().item()
             total_pixels += valid.sum().item()
@@ -106,14 +107,14 @@ def main() -> None:
                 confmat=confmat,
                 preds=preds.detach().cpu(),
                 targets=masks.detach().cpu(),
-                num_classes=int(checkpoint_num_classes),
+                num_classes=num_classes,
             )
 
     mean_loss = total_loss / max(num_batches, 1)
     pixel_acc = correct_pixels / total_pixels if total_pixels > 0 else 0.0
 
     iou_per_class: list[float | None] = []
-    for cls in range(int(checkpoint_num_classes)):
+    for cls in range(num_classes):
         tp = confmat[cls, cls].item()
         fp = confmat[:, cls].sum().item() - tp
         fn = confmat[cls, :].sum().item() - tp
