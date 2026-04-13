@@ -34,7 +34,7 @@ def update_confusion_matrix(
     num_classes: int,
     ignore_index: int = IGNORE_INDEX,
 ) -> None:
-    valid = targets != ignore_index
+    valid = (targets != ignore_index) & (targets >= 0) & (targets < num_classes)
     if valid.sum() == 0:
         return
 
@@ -99,7 +99,7 @@ def main() -> None:
             total_loss += loss.item()
             num_batches += 1
 
-            valid = masks != IGNORE_INDEX
+            valid = (masks != IGNORE_INDEX) & (masks >= 0) & (masks < args.num_classes)
             correct_pixels += (preds[valid] == masks[valid]).sum().item()
             total_pixels += valid.sum().item()
 
@@ -113,16 +113,17 @@ def main() -> None:
     mean_loss = total_loss / max(num_batches, 1)
     pixel_acc = correct_pixels / total_pixels if total_pixels > 0 else 0.0
 
-    iou_per_class = []
+    iou_per_class: list[float | None] = []
     for cls in range(args.num_classes):
         tp = confmat[cls, cls].item()
         fp = confmat[:, cls].sum().item() - tp
         fn = confmat[cls, :].sum().item() - tp
         denom = tp + fp + fn
-        iou = tp / denom if denom > 0 else 0.0
+        iou = tp / denom if denom > 0 else None
         iou_per_class.append(iou)
 
-    mean_iou = sum(iou_per_class) / max(len(iou_per_class), 1)
+    valid_ious = [iou for iou in iou_per_class if iou is not None]
+    mean_iou = sum(valid_ious) / len(valid_ious) if valid_ious else 0.0
 
     print("=" * 60)
     print("Segmentation evaluation summary")
@@ -136,7 +137,10 @@ def main() -> None:
     print(f"mean_loss: {mean_loss:.6f}")
     print(f"pixel_accuracy: {pixel_acc:.6f}")
     for cls, iou in enumerate(iou_per_class):
-        print(f"iou_class_{cls}: {iou:.6f}")
+        if iou is None:
+            print(f"iou_class_{cls}: n/a")
+        else:
+            print(f"iou_class_{cls}: {iou:.6f}")
     print(f"mean_iou: {mean_iou:.6f}")
     print("=" * 60)
 
