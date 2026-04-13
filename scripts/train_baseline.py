@@ -13,6 +13,8 @@ from torch.utils.data import DataLoader
 
 from mrti.data.dataset import AI4MarsSegmentationDataset
 
+FIXED_CLASS_WEIGHTS = (0.668995, 0.504918, 2.050571, 27.003855)
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Simple baseline training for segmentation")
@@ -25,6 +27,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-val-batches", type=int, default=1)
     parser.add_argument("--model", type=str, choices=["cnn", "unet"], default="unet")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--use-class-weights", action="store_true")
+    parser.add_argument("--use-train-augmentations", action="store_true")
     return parser.parse_args()
 
 
@@ -48,8 +52,10 @@ class ConvBlock(nn.Module):
         super().__init__()
         self.block = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True),
             nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True),
         )
 
@@ -60,22 +66,28 @@ class ConvBlock(nn.Module):
 class SmallUNet(nn.Module):
     def __init__(self, num_classes: int) -> None:
         super().__init__()
-        self.enc1 = ConvBlock(3, 16)
-        self.enc2 = ConvBlock(16, 32)
-        self.bottleneck = ConvBlock(32, 64)
+        self.enc1 = ConvBlock(3, 32)
+        self.enc2 = ConvBlock(32, 64)
+        self.enc3 = ConvBlock(64, 128)
+        self.bottleneck = ConvBlock(128, 256)
 
-        self.dec2 = ConvBlock(64 + 32, 32)
-        self.dec1 = ConvBlock(32 + 16, 16)
+        self.dec3 = ConvBlock(256 + 128, 128)
+        self.dec2 = ConvBlock(128 + 64, 64)
+        self.dec1 = ConvBlock(64 + 32, 32)
 
         self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
-        self.classifier = nn.Conv2d(16, num_classes, kernel_size=1)
+        self.classifier = nn.Conv2d(32, num_classes, kernel_size=1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         enc1 = self.enc1(x)
         enc2 = self.enc2(self.pool(enc1))
-        bottleneck = self.bottleneck(self.pool(enc2))
+        enc3 = self.enc3(self.pool(enc2))
+        bottleneck = self.bottleneck(self.pool(enc3))
 
-        up2 = F.interpolate(bottleneck, size=enc2.shape[-2:], mode="bilinear", align_corners=False)
+        up3 = F.interpolate(bottleneck, size=enc3.shape[-2:], mode="bilinear", align_corners=False)
+        dec3 = self.dec3(torch.cat([up3, enc3], dim=1))
+
+        up2 = F.interpolate(dec3, size=enc2.shape[-2:], mode="bilinear", align_corners=False)
         dec2 = self.dec2(torch.cat([up2, enc2], dim=1))
 
         up1 = F.interpolate(dec2, size=enc1.shape[-2:], mode="bilinear", align_corners=False)
@@ -115,11 +127,17 @@ def main() -> None:
         torch.cuda.manual_seed_all(args.seed)
     print("Seed:", args.seed)
     print("Model:", args.model)
+    print("Use class weights:", args.use_class_weights)
+    print("Use train augmentations:", args.use_train_augmentations)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Device:", device)
 
-    train_ds = AI4MarsSegmentationDataset(dataset_root=args.dataset_root, split="train")
+    train_ds = AI4MarsSegmentationDataset(
+        dataset_root=args.dataset_root,
+        split="train",
+        use_augmentations=args.use_train_augmentations,
+    )
     val_ds = AI4MarsSegmentationDataset(dataset_root=args.dataset_root, split="val")
 
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
@@ -128,8 +146,26 @@ def main() -> None:
     print(f"Train samples: {len(train_ds)} | Val samples: {len(val_ds)}")
 
     model = build_model(args.model, args.num_classes).to(device)
-    criterion = nn.CrossEntropyLoss(ignore_index=255)
+    class_weights = None
+    if args.use_class_weights:
+        class_weights = torch.tensor(FIXED_CLASS_WEIGHTS, dtype=torch.float32, device=device)
+        if len(class_weights) != args.num_classes:
+            raise ValueError(
+                f"FIXED_CLASS_WEIGHTS expects {len(class_weights)} classes but got "
+                f"--num-classes={args.num_classes}"
+            )
+        class_weights_list = [round(x, 6) for x in class_weights.detach().cpu().tolist()]
+        print("Class weights mode: enabled")
+        print("Using fixed class weights:", class_weights_list)
+    else:
+        print("Class weights mode: disabled (uniform CE)")
+    criterion = nn.CrossEntropyLoss(weight=class_weights, ignore_index=255)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    best_epoch = -1
+    best_mean_iou = -1.0
+    best_iou_per_class = [0.0 for _ in range(args.num_classes)]
+    best_checkpoint_path = Path("checkpoints") / "baseline_best.pt"
+    best_checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
 
     for epoch in range(args.epochs):
         model.train()
@@ -158,6 +194,8 @@ def main() -> None:
         val_losses = []
         iou_intersections = torch.zeros(args.num_classes, dtype=torch.float64)
         iou_unions = torch.zeros(args.num_classes, dtype=torch.float64)
+        target_pixel_counts = torch.zeros(args.num_classes, dtype=torch.float64)
+        pred_pixel_counts = torch.zeros(args.num_classes, dtype=torch.float64)
         with torch.no_grad():
             for batch_idx, batch in enumerate(val_loader):
                 images = batch["image"].to(device)
@@ -174,6 +212,12 @@ def main() -> None:
                     unions=iou_unions,
                     num_classes=args.num_classes,
                 )
+                valid = masks != 255
+                valid_targets = masks[valid]
+                valid_preds = preds[valid]
+                for cls in range(args.num_classes):
+                    target_pixel_counts[cls] += (valid_targets == cls).sum().item()
+                    pred_pixel_counts[cls] += (valid_preds == cls).sum().item()
 
                 print(
                     f"[epoch {epoch + 1}] val batch {batch_idx + 1} "
@@ -199,6 +243,38 @@ def main() -> None:
             f"train_loss={train_mean:.4f}, val_loss={val_mean:.4f}, "
             f"{iou_text}, mean_iou={mean_iou:.4f}"
         )
+        if mean_iou > best_mean_iou:
+            best_epoch = epoch + 1
+            best_mean_iou = mean_iou
+            best_iou_per_class = iou_per_class.copy()
+            torch.save(
+                {
+                    "epoch": best_epoch,
+                    "model_state_dict": model.state_dict(),
+                    "best_mean_iou": best_mean_iou,
+                    "model_name": args.model,
+                    "use_class_weights": args.use_class_weights,
+                },
+                best_checkpoint_path,
+            )
+            print(
+                f"Saved new best model checkpoint to {best_checkpoint_path} "
+                f"(epoch={best_epoch}, mean_iou={best_mean_iou:.4f})"
+            )
+        for cls in range(args.num_classes):
+            print(
+                f"class_{cls} target_pixels={int(target_pixel_counts[cls].item())} "
+                f"predicted_pixels={int(pred_pixel_counts[cls].item())}"
+            )
+
+    best_iou_text = ", ".join(
+        [f"class_{cls}_iou={best_iou_per_class[cls]:.4f}" for cls in range(args.num_classes)]
+    )
+    print(
+        f"Best validation epoch -> best_epoch={best_epoch}, "
+        f"best_mean_iou={best_mean_iou:.4f}, {best_iou_text}"
+    )
+    print(f"Best checkpoint path: {best_checkpoint_path}")
 
 
 if __name__ == "__main__":
