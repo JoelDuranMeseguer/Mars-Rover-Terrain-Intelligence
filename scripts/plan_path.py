@@ -12,6 +12,8 @@ from mrti.data.dataset import AI4MarsSegmentationDataset
 from train_baseline import build_model
 from build_cost_map import CLASS_COSTS, colorize_cost_map, mask_to_cost_map, to_uint8_image
 
+LOCAL_PLANNING_MIN_ROW_RATIO = 0.55
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Plan a simple path on a predicted terrain cost map")
@@ -148,23 +150,28 @@ def main() -> None:
     pred_mask = logits.argmax(dim=1).squeeze(0).detach().cpu().numpy().astype(np.int64)
     cost_map = mask_to_cost_map(pred_mask)
 
+    # Local planning mask: allow planning only in lower part of the image.
     h, w = cost_map.shape
+    min_plan_row = int(h * LOCAL_PLANNING_MIN_ROW_RATIO)
+    masked_cost_map = cost_map.copy()
+    masked_cost_map[:min_plan_row, :] = CLASS_COSTS[255]
+
     raw_start = (max(h - 5, 0), w // 2)
-    raw_goal = (min(5, h - 1), w // 2)
-    start = find_nearest_traversable(cost_map, raw_start)
-    goal = find_nearest_traversable(cost_map, raw_goal)
+    raw_goal = (min(min_plan_row + 5, h - 1), w // 2)
+    start = find_nearest_traversable(masked_cost_map, raw_start)
+    goal = find_nearest_traversable(masked_cost_map, raw_goal)
 
     if start is None or goal is None:
         raise RuntimeError("Could not find traversable start/goal points in this sample.")
 
-    path = astar(cost_map, start, goal)
+    path = astar(masked_cost_map, start, goal)
     if path is None:
         print("No path found.")
     else:
         print(f"Path found with {len(path)} waypoints.")
 
     image_rgb = to_uint8_image(sample["image"])
-    cost_rgb = colorize_cost_map(cost_map)
+    cost_rgb = colorize_cost_map(masked_cost_map)
     path_rgb = draw_path_on_cost_map(cost_rgb, path, start, goal)
     panel = make_triptych(image_rgb, cost_rgb, path_rgb)
 
