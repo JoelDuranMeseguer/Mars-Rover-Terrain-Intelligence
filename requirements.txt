@@ -3,3 +3,5 @@ pandas
 pyyaml
 streamlit
 pytest
+torch
+torchaudio
