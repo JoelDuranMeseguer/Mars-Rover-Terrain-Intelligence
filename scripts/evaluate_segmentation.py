@@ -8,7 +8,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from mrti.data.dataset import AI4MarsSegmentationDataset
-from train_baseline import FIXED_CLASS_WEIGHTS, build_model
+from train_baseline import build_model
 
 
 IGNORE_INDEX = 255
@@ -23,7 +23,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-classes", type=int, default=4)
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--num-workers", type=int, default=0)
-    parser.add_argument("--use-class-weights", action="store_true")
     return parser.parse_args()
 
 
@@ -49,6 +48,16 @@ def update_confusion_matrix(
 def main() -> None:
     args = parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    checkpoint = torch.load(args.checkpoint, map_location=device)
+
+    if isinstance(checkpoint, dict):
+        checkpoint_model_name = checkpoint.get("model_name") or checkpoint.get("model") or args.model
+        checkpoint_num_classes = checkpoint.get("num_classes", args.num_classes)
+        state_dict = checkpoint.get("model_state_dict") or checkpoint.get("state_dict") or checkpoint
+    else:
+        checkpoint_model_name = args.model
+        checkpoint_num_classes = args.num_classes
+        state_dict = checkpoint
 
     dataset = AI4MarsSegmentationDataset(dataset_root=args.dataset_root, split=args.split)
     dataloader = DataLoader(
@@ -58,34 +67,20 @@ def main() -> None:
         num_workers=args.num_workers,
     )
 
-    checkpoint = torch.load(args.checkpoint, map_location=device)
-    checkpoint_model_name = checkpoint.get("model_name", args.model)
-
-    if checkpoint_model_name != args.model:
-        raise ValueError(
-            f"--model ({args.model}) does not match checkpoint model_name ({checkpoint_model_name})."
-        )
-
-    model = build_model(model_name=args.model, num_classes=args.num_classes).to(device)
-    model.load_state_dict(checkpoint["model_state_dict"])
+    model = build_model(
+        model_name=str(checkpoint_model_name),
+        num_classes=int(checkpoint_num_classes),
+    ).to(device)
+    model.load_state_dict(state_dict)
     model.eval()
 
-    class_weights = None
-    if args.use_class_weights:
-        class_weights = torch.tensor(FIXED_CLASS_WEIGHTS, dtype=torch.float32, device=device)
-        if len(class_weights) != args.num_classes:
-            raise ValueError(
-                f"FIXED_CLASS_WEIGHTS expects {len(class_weights)} classes but got "
-                f"--num-classes={args.num_classes}"
-            )
-
-    criterion = nn.CrossEntropyLoss(weight=class_weights, ignore_index=IGNORE_INDEX)
+    criterion = nn.CrossEntropyLoss(ignore_index=IGNORE_INDEX)
 
     total_loss = 0.0
     num_batches = 0
     correct_pixels = 0
     total_pixels = 0
-    confmat = torch.zeros((args.num_classes, args.num_classes), dtype=torch.int64)
+    confmat = torch.zeros((int(checkpoint_num_classes), int(checkpoint_num_classes)), dtype=torch.int64)
 
     with torch.no_grad():
         for batch in dataloader:
@@ -99,7 +94,11 @@ def main() -> None:
             total_loss += loss.item()
             num_batches += 1
 
-            valid = (masks != IGNORE_INDEX) & (masks >= 0) & (masks < args.num_classes)
+            valid = (
+                (masks != IGNORE_INDEX)
+                & (masks >= 0)
+                & (masks < int(checkpoint_num_classes))
+            )
             correct_pixels += (preds[valid] == masks[valid]).sum().item()
             total_pixels += valid.sum().item()
 
@@ -107,14 +106,14 @@ def main() -> None:
                 confmat=confmat,
                 preds=preds.detach().cpu(),
                 targets=masks.detach().cpu(),
-                num_classes=args.num_classes,
+                num_classes=int(checkpoint_num_classes),
             )
 
     mean_loss = total_loss / max(num_batches, 1)
     pixel_acc = correct_pixels / total_pixels if total_pixels > 0 else 0.0
 
     iou_per_class: list[float | None] = []
-    for cls in range(args.num_classes):
+    for cls in range(int(checkpoint_num_classes)):
         tp = confmat[cls, cls].item()
         fp = confmat[:, cls].sum().item() - tp
         fn = confmat[cls, :].sum().item() - tp
@@ -132,7 +131,8 @@ def main() -> None:
     print(f"split: {args.split}")
     print(f"num_samples: {len(dataset)}")
     print(f"checkpoint: {args.checkpoint}")
-    print(f"model: {args.model}")
+    print(f"model: {checkpoint_model_name}")
+    print(f"num_classes: {checkpoint_num_classes}")
     print(f"device: {device}")
     print(f"mean_loss: {mean_loss:.6f}")
     print(f"pixel_accuracy: {pixel_acc:.6f}")
