@@ -2,6 +2,42 @@
 
 A clean project template for terrain segmentation, traversability analysis, and path planning.
 
+## Problem and current MVP scope
+
+This project explores how to go from a single rover image to a **local route recommendation**:
+
+1. semantic segmentation (terrain understanding),
+2. class-to-cost mapping (traversability interpretation),
+3. local A* path suggestion on the resulting grid.
+
+Current scope is intentionally limited to **decision support**, not full autonomy.
+
+- ✅ What this MVP does:
+  - produce segmentation masks,
+  - build an interpretable terrain cost map,
+  - generate a local 2D A* path recommendation.
+- ❌ What this MVP does not do (yet):
+  - global navigation,
+  - 3D geometry / BEV projection,
+  - dynamic obstacle handling,
+  - rover control/actuation in closed loop.
+
+## Current pipeline (perception -> interpretation -> decision support)
+
+```text
+RGB image
+   ↓
+Segmentation model (CNN / UNet baseline)
+   ↓
+Predicted terrain classes
+   ↓
+Class-cost mapping
+   ↓
+Local cost map
+   ↓
+A* on 2D grid (local recommendation)
+```
+
 ## Repository layout
 
 ```text
@@ -31,6 +67,50 @@ python -m pip install -e .
 pytest -q
 streamlit run app/Home.py
 ```
+
+## Demo outputs (MVP)
+
+After training and saving a best checkpoint, you can generate qualitative outputs:
+
+```bash
+# 1) Image | GT mask | Predicted mask
+python scripts/inspect_predictions.py \
+  --checkpoint checkpoints/baseline_best.pt \
+  --model unet \
+  --num-samples 4
+
+# 2) Image | Predicted mask | Cost map
+python scripts/build_cost_map.py \
+  --checkpoint checkpoints/baseline_best.pt \
+  --model unet \
+  --num-samples 4
+
+# 3) Image | Cost map | Cost map + local A* path
+python scripts/plan_path.py \
+  --checkpoint checkpoints/baseline_best.pt \
+  --model unet \
+  --sample-idx 0
+```
+
+Default output folders:
+
+- `outputs/predictions/`
+- `outputs/cost_maps/`
+- `outputs/path_plans/`
+
+## Limitations (honest status)
+
+- Planning is image-plane and local; it is not physically grounded 3D navigation.
+- Cost mapping currently uses fixed, hand-defined class costs.
+- Path quality depends directly on segmentation quality and may degrade under distribution shift.
+- Start/goal and local planning mask are heuristic choices for MVP demonstration.
+
+## Next steps
+
+- Improve segmentation robustness (more data, stronger validation, better calibration).
+- Replace fixed class costs with data-informed or learned traversability estimates.
+- Add geometric grounding (depth/BEV) before making stronger navigation claims.
+- Move from static recommendation to closed-loop evaluation in simulation.
 
 ## Data placement
 
@@ -115,4 +195,3 @@ Pasos recomendados:
    ```
 
 Para el script `scripts/check_dataset.py` también se añadió un fallback pequeño que agrega `src/` al `sys.path` cuando lo ejecutas directamente.
-
