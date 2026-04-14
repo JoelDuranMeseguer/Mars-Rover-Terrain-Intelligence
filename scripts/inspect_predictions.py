@@ -131,6 +131,14 @@ def main() -> None:
             image = sample["image"]
             target = sample["mask"]
             sample_id = sample["id"]
+            if args.target_class is not None:
+                target_pixels = int((target == args.target_class).sum().item())
+                print(
+                    f"selected dataset_index={ds_idx} sample_id={sample_id} "
+                    f"target_class_pixels={target_pixels}"
+                )
+            else:
+                print(f"selected dataset_index={ds_idx} sample_id={sample_id}")
 
             logits = model(image.unsqueeze(0).to(device))
             pred = logits.argmax(dim=1).squeeze(0).detach().cpu().numpy().astype(np.uint8)
