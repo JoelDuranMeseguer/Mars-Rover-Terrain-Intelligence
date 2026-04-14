@@ -159,7 +159,10 @@ def main() -> None:
         print("Using fixed class weights:", class_weights_list)
     else:
         print("Class weights mode: disabled (uniform CE)")
-    criterion = nn.CrossEntropyLoss(weight=class_weights, ignore_index=255)
+    if args.use_class_weights:
+        criterion = nn.CrossEntropyLoss(weight=class_weights, ignore_index=255)
+    else:
+        criterion = nn.CrossEntropyLoss(ignore_index=255)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     best_epoch = -1
     best_mean_iou = -1.0
