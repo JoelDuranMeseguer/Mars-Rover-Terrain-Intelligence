@@ -12,12 +12,15 @@ from train_baseline import build_model
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Inspect baseline predictions on validation samples")
+    parser = argparse.ArgumentParser(description="Inspect baseline predictions on AI4Mars samples")
     parser.add_argument("--dataset-root", type=Path, default=Path("data/processed/msl_ncam_v1"))
+    parser.add_argument("--split", type=str, choices=["train", "val", "test"], default="val")
     parser.add_argument("--model", type=str, choices=["cnn", "unet"], default="unet")
     parser.add_argument("--num-classes", type=int, default=4)
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--num-samples", type=int, default=4)
+    parser.add_argument("--max-samples", type=int, default=None)
+    parser.add_argument("--target-class", type=int, default=None)
     parser.add_argument("--output-dir", type=Path, default=Path("outputs/predictions"))
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
@@ -89,14 +92,30 @@ def main() -> None:
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
 
-    val_ds = AI4MarsSegmentationDataset(dataset_root=args.dataset_root, split="val")
+    dataset = AI4MarsSegmentationDataset(dataset_root=args.dataset_root, split=args.split)
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    n_samples = min(args.num_samples, len(val_ds))
-    print(f"Saving {n_samples} prediction previews to: {args.output_dir}")
+    limit = args.max_samples if args.max_samples is not None else args.num_samples
+    if limit <= 0:
+        raise ValueError("--max-samples/--num-samples must be > 0")
+
+    selected_indices: list[int] = []
+    for idx in range(len(dataset)):
+        sample = dataset[idx]
+        if args.target_class is not None:
+            if not (sample["mask"] == args.target_class).any().item():
+                continue
+        selected_indices.append(idx)
+        if len(selected_indices) >= limit:
+            break
+
+    print(
+        f"Saving {len(selected_indices)} prediction previews to: {args.output_dir} "
+        f"(split={args.split}, target_class={args.target_class})"
+    )
     with torch.no_grad():
-        for idx in range(n_samples):
-            sample = val_ds[idx]
+        for out_idx, ds_idx in enumerate(selected_indices):
+            sample = dataset[ds_idx]
             image = sample["image"]
             target = sample["mask"]
             sample_id = sample["id"]
@@ -107,7 +126,7 @@ def main() -> None:
             image_np = to_uint8_image(image)
             target_np = target.detach().cpu().numpy().astype(np.uint8)
             canvas = make_triptych(image_np, target_np, pred)
-            output_path = args.output_dir / f"{idx:03d}_{sample_id}.png"
+            output_path = args.output_dir / f"{out_idx:03d}_{sample_id}.png"
             Image.fromarray(canvas).save(output_path)
             print(f"saved={output_path}")
 
