@@ -1,4 +1,4 @@
-"""Visual inspection tool for baseline segmentation predictions on val split."""
+"""Visual inspection tool for baseline segmentation predictions on AI4Mars splits."""
 
 import argparse
 from pathlib import Path
@@ -18,11 +18,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", type=str, choices=["cnn", "unet"], default="unet")
     parser.add_argument("--num-classes", type=int, default=4)
     parser.add_argument("--checkpoint", type=Path, required=True)
-    parser.add_argument("--num-samples", type=int, default=4)
-    parser.add_argument("--max-samples", type=int, default=None)
+    parser.add_argument("--max-samples", type=int, default=4)
     parser.add_argument("--target-class", type=int, default=None)
     parser.add_argument("--output-dir", type=Path, default=Path("outputs/predictions"))
-    parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
 
 
@@ -59,45 +57,47 @@ def make_triptych(image: np.ndarray, target_mask: np.ndarray, pred_mask: np.ndar
 
 def main() -> None:
     args = parse_args()
-    torch.manual_seed(args.seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(args.seed)
-
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Device:", device)
     print("Checkpoint:", args.checkpoint)
 
     checkpoint = torch.load(args.checkpoint, map_location=device)
-    checkpoint_epoch = checkpoint["epoch"]
-    checkpoint_best_mean_iou = checkpoint["best_mean_iou"]
-    checkpoint_model_name = checkpoint["model_name"]
-    checkpoint_use_class_weights = checkpoint["use_class_weights"]
+    if isinstance(checkpoint, dict):
+        checkpoint_epoch = checkpoint.get("epoch")
+        checkpoint_best_mean_iou = checkpoint.get("best_mean_iou")
+        checkpoint_model_name = checkpoint.get("model_name") or checkpoint.get("model") or args.model
+        checkpoint_use_class_weights = checkpoint.get("use_class_weights")
+        state_dict = checkpoint.get("model_state_dict") or checkpoint.get("state_dict") or checkpoint
+    else:
+        checkpoint_epoch = None
+        checkpoint_best_mean_iou = None
+        checkpoint_model_name = args.model
+        checkpoint_use_class_weights = None
+        state_dict = checkpoint
     print(
         "Checkpoint info:",
         {
             "epoch": checkpoint_epoch,
-            "best_mean_iou": round(float(checkpoint_best_mean_iou), 6),
+            "best_mean_iou": (
+                round(float(checkpoint_best_mean_iou), 6)
+                if checkpoint_best_mean_iou is not None
+                else None
+            ),
             "model_name": checkpoint_model_name,
             "use_class_weights": checkpoint_use_class_weights,
         },
     )
-    if args.model != checkpoint_model_name:
-        raise ValueError(
-            f"--model ({args.model}) does not match checkpoint model_name "
-            f"({checkpoint_model_name})."
-        )
     print("Model:", checkpoint_model_name)
 
     model = build_model(model_name=checkpoint_model_name, num_classes=args.num_classes).to(device)
-    model.load_state_dict(checkpoint["model_state_dict"])
+    model.load_state_dict(state_dict)
     model.eval()
 
     dataset = AI4MarsSegmentationDataset(dataset_root=args.dataset_root, split=args.split)
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    limit = args.max_samples if args.max_samples is not None else args.num_samples
-    if limit <= 0:
-        raise ValueError("--max-samples/--num-samples must be > 0")
+    if args.max_samples <= 0:
+        raise ValueError("--max-samples must be > 0")
 
     selected_indices: list[int] = []
     for idx in range(len(dataset)):
@@ -106,8 +106,15 @@ def main() -> None:
             if not (sample["mask"] == args.target_class).any().item():
                 continue
         selected_indices.append(idx)
-        if len(selected_indices) >= limit:
+        if len(selected_indices) >= args.max_samples:
             break
+
+    if not selected_indices:
+        print(
+            "No matching samples found"
+            f" for split={args.split}, target_class={args.target_class}."
+        )
+        return
 
     print(
         f"Saving {len(selected_indices)} prediction previews to: {args.output_dir} "
