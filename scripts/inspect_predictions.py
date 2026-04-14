@@ -20,6 +20,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--max-samples", type=int, default=4)
     parser.add_argument("--target-class", type=int, default=None)
+    parser.add_argument("--min-target-pixels", type=int, default=1)
     parser.add_argument("--output-dir", type=Path, default=Path("outputs/predictions"))
     return parser.parse_args()
 
@@ -98,12 +99,15 @@ def main() -> None:
 
     if args.max_samples <= 0:
         raise ValueError("--max-samples must be > 0")
+    if args.min_target_pixels <= 0:
+        raise ValueError("--min-target-pixels must be > 0")
 
     selected_indices: list[int] = []
     for idx in range(len(dataset)):
         sample = dataset[idx]
         if args.target_class is not None:
-            if not (sample["mask"] == args.target_class).any().item():
+            target_pixels = int((sample["mask"] == args.target_class).sum().item())
+            if target_pixels < args.min_target_pixels:
                 continue
         selected_indices.append(idx)
         if len(selected_indices) >= args.max_samples:
@@ -118,7 +122,8 @@ def main() -> None:
 
     print(
         f"Saving {len(selected_indices)} prediction previews to: {args.output_dir} "
-        f"(split={args.split}, target_class={args.target_class})"
+        f"(split={args.split}, target_class={args.target_class}, "
+        f"min_target_pixels={args.min_target_pixels})"
     )
     with torch.no_grad():
         for out_idx, ds_idx in enumerate(selected_indices):
