@@ -114,10 +114,20 @@ def main() -> None:
     pixel_acc = correct_pixels / total_pixels if total_pixels > 0 else 0.0
 
     iou_per_class: list[float | None] = []
+    precision_per_class: list[float | None] = []
+    recall_per_class: list[float | None] = []
     for cls in range(num_classes):
         tp = confmat[cls, cls].item()
         fp = confmat[:, cls].sum().item() - tp
         fn = confmat[cls, :].sum().item() - tp
+
+        precision_denom = tp + fp
+        recall_denom = tp + fn
+        precision = tp / precision_denom if precision_denom > 0 else None
+        recall = tp / recall_denom if recall_denom > 0 else None
+        precision_per_class.append(precision)
+        recall_per_class.append(recall)
+
         denom = tp + fp + fn
         iou = tp / denom if denom > 0 else None
         iou_per_class.append(iou)
@@ -138,6 +148,16 @@ def main() -> None:
     print(f"mean_loss: {mean_loss:.6f}")
     print(f"pixel_accuracy: {pixel_acc:.6f}")
     for cls, iou in enumerate(iou_per_class):
+        precision = precision_per_class[cls]
+        recall = recall_per_class[cls]
+        if precision is None:
+            print(f"precision_class_{cls}: n/a")
+        else:
+            print(f"precision_class_{cls}: {precision:.6f}")
+        if recall is None:
+            print(f"recall_class_{cls}: n/a")
+        else:
+            print(f"recall_class_{cls}: {recall:.6f}")
         if iou is None:
             print(f"iou_class_{cls}: n/a")
         else:
