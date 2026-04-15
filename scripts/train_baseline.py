@@ -28,6 +28,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", type=str, choices=["cnn", "unet"], default="unet")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--use-class-weights", action="store_true")
+    parser.add_argument(
+        "--class-weights",
+        type=str,
+        default=None,
+        help='Optional comma-separated class weights, e.g. "0.66,0.50,2.05,27.0"',
+    )
+    parser.add_argument(
+        "--checkpoint-path",
+        type=Path,
+        default=Path("checkpoints") / "baseline_best.pt",
+        help="Path to save the best checkpoint.",
+    )
     parser.add_argument("--use-train-augmentations", action="store_true")
     return parser.parse_args()
 
@@ -148,15 +160,22 @@ def main() -> None:
     model = build_model(args.model, args.num_classes).to(device)
     class_weights = None
     if args.use_class_weights:
-        class_weights = torch.tensor(FIXED_CLASS_WEIGHTS, dtype=torch.float32, device=device)
-        if len(class_weights) != args.num_classes:
+        if args.class_weights is not None:
+            class_weights_values = [float(x.strip()) for x in args.class_weights.split(",")]
+            weights_source = "CLI (--class-weights)"
+        else:
+            class_weights_values = list(FIXED_CLASS_WEIGHTS)
+            weights_source = "FIXED_CLASS_WEIGHTS"
+
+        if len(class_weights_values) != args.num_classes:
             raise ValueError(
-                f"FIXED_CLASS_WEIGHTS expects {len(class_weights)} classes but got "
-                f"--num-classes={args.num_classes}"
+                f"Expected {args.num_classes} class weights but got "
+                f"{len(class_weights_values)} from {weights_source}"
             )
+        class_weights = torch.tensor(class_weights_values, dtype=torch.float32, device=device)
         class_weights_list = [round(x, 6) for x in class_weights.detach().cpu().tolist()]
         print("Class weights mode: enabled")
-        print("Using fixed class weights:", class_weights_list)
+        print(f"Using class weights from {weights_source}:", class_weights_list)
     else:
         print("Class weights mode: disabled (uniform CE)")
     if args.use_class_weights:
@@ -167,7 +186,7 @@ def main() -> None:
     best_epoch = -1
     best_mean_iou = -1.0
     best_iou_per_class = [0.0 for _ in range(args.num_classes)]
-    best_checkpoint_path = Path("checkpoints") / "baseline_best.pt"
+    best_checkpoint_path = args.checkpoint_path
     best_checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
 
     for epoch in range(args.epochs):
