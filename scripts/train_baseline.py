@@ -134,6 +134,9 @@ def update_iou_stats(
 
 def main() -> None:
     args = parse_args()
+    if args.class_weights is not None and not args.use_class_weights:
+        raise ValueError("--class-weights requires --use-class-weights")
+
     torch.manual_seed(args.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
@@ -161,7 +164,13 @@ def main() -> None:
     class_weights = None
     if args.use_class_weights:
         if args.class_weights is not None:
-            class_weights_values = [float(x.strip()) for x in args.class_weights.split(",")]
+            try:
+                class_weights_values = [float(x.strip()) for x in args.class_weights.split(",")]
+            except ValueError as exc:
+                raise ValueError(
+                    "--class-weights must be a comma-separated list of numeric values, "
+                    'for example: "0.66,0.50,2.05,27.0"'
+                ) from exc
             weights_source = "CLI (--class-weights)"
         else:
             class_weights_values = list(FIXED_CLASS_WEIGHTS)
@@ -186,7 +195,7 @@ def main() -> None:
     best_epoch = -1
     best_mean_iou = -1.0
     best_iou_per_class = [0.0 for _ in range(args.num_classes)]
-    best_checkpoint_path = args.checkpoint_path
+    best_checkpoint_path = Path(str(args.checkpoint_path).replace("\\", "/"))
     best_checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
 
     for epoch in range(args.epochs):
