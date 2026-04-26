@@ -23,8 +23,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--max-train-batches", type=int, default=1)
-    parser.add_argument("--max-val-batches", type=int, default=1)
+    parser.add_argument(
+        "--max-train-batches",
+        type=int,
+        default=None,
+        help="Optional cap on train batches per epoch. Default: use all batches.",
+    )
+    parser.add_argument(
+        "--max-val-batches",
+        type=int,
+        default=None,
+        help="Optional cap on val batches per epoch. Default: use all batches.",
+    )
     parser.add_argument("--model", type=str, choices=["cnn", "unet"], default="unet")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--use-class-weights", action="store_true")
@@ -144,6 +154,8 @@ def main() -> None:
     print("Model:", args.model)
     print("Use class weights:", args.use_class_weights)
     print("Use train augmentations:", args.use_train_augmentations)
+    print("Max train batches:", args.max_train_batches)
+    print("Max val batches:", args.max_val_batches)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Device:", device)
@@ -218,7 +230,7 @@ def main() -> None:
                 f"loss={loss.item():.4f}"
             )
 
-            if (batch_idx + 1) >= args.max_train_batches:
+            if args.max_train_batches is not None and (batch_idx + 1) >= args.max_train_batches:
                 break
 
         model.eval()
@@ -255,7 +267,7 @@ def main() -> None:
                     f"loss={loss.item():.4f}"
                 )
 
-                if (batch_idx + 1) >= args.max_val_batches:
+                if args.max_val_batches is not None and (batch_idx + 1) >= args.max_val_batches:
                     break
 
         train_mean = sum(train_losses) / max(len(train_losses), 1)
