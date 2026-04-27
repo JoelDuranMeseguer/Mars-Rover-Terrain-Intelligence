@@ -21,6 +21,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dataset-root", type=Path, default=Path("data/processed/msl_ncam_v1"))
     parser.add_argument("--num-classes", type=int, default=4)
     parser.add_argument("--batch-size", type=int, default=2)
+    parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument(
@@ -51,6 +52,12 @@ def parse_args() -> argparse.Namespace:
         help="Path to save the best checkpoint.",
     )
     parser.add_argument("--use-train-augmentations", action="store_true")
+    parser.add_argument(
+        "--log-every",
+        type=int,
+        default=50,
+        help="Print batch loss every N batches (train/val).",
+    )
     return parser.parse_args()
 
 
@@ -156,6 +163,8 @@ def main() -> None:
     print("Use train augmentations:", args.use_train_augmentations)
     print("Max train batches:", args.max_train_batches)
     print("Max val batches:", args.max_val_batches)
+    print("Num workers:", args.num_workers)
+    print("Log every:", args.log_every)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Device:", device)
@@ -167,8 +176,18 @@ def main() -> None:
     )
     val_ds = AI4MarsSegmentationDataset(dataset_root=args.dataset_root, split="val")
 
-    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
-    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False)
+    train_loader = DataLoader(
+        train_ds,
+        batch_size=args.batch_size,
+        shuffle=True,
+        num_workers=args.num_workers,
+    )
+    val_loader = DataLoader(
+        val_ds,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=args.num_workers,
+    )
 
     print(f"Train samples: {len(train_ds)} | Val samples: {len(val_ds)}")
 
@@ -225,10 +244,11 @@ def main() -> None:
             optimizer.step()
 
             train_losses.append(loss.item())
-            print(
-                f"[epoch {epoch + 1}] train batch {batch_idx + 1} "
-                f"loss={loss.item():.4f}"
-            )
+            if args.log_every > 0 and ((batch_idx + 1) % args.log_every == 0 or batch_idx == 0):
+                print(
+                    f"[epoch {epoch + 1}] train batch {batch_idx + 1} "
+                    f"loss={loss.item():.4f}"
+                )
 
             if args.max_train_batches is not None and (batch_idx + 1) >= args.max_train_batches:
                 break
@@ -262,10 +282,11 @@ def main() -> None:
                     target_pixel_counts[cls] += (valid_targets == cls).sum().item()
                     pred_pixel_counts[cls] += (valid_preds == cls).sum().item()
 
-                print(
-                    f"[epoch {epoch + 1}] val batch {batch_idx + 1} "
-                    f"loss={loss.item():.4f}"
-                )
+                if args.log_every > 0 and ((batch_idx + 1) % args.log_every == 0 or batch_idx == 0):
+                    print(
+                        f"[epoch {epoch + 1}] val batch {batch_idx + 1} "
+                        f"loss={loss.item():.4f}"
+                    )
 
                 if args.max_val_batches is not None and (batch_idx + 1) >= args.max_val_batches:
                     break
