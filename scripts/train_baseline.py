@@ -21,14 +21,43 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dataset-root", type=Path, default=Path("data/processed/msl_ncam_v1"))
     parser.add_argument("--num-classes", type=int, default=4)
     parser.add_argument("--batch-size", type=int, default=2)
+    parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--max-train-batches", type=int, default=1)
-    parser.add_argument("--max-val-batches", type=int, default=1)
+    parser.add_argument(
+        "--max-train-batches",
+        type=int,
+        default=None,
+        help="Optional cap on train batches per epoch. Default: use all batches.",
+    )
+    parser.add_argument(
+        "--max-val-batches",
+        type=int,
+        default=None,
+        help="Optional cap on val batches per epoch. Default: use all batches.",
+    )
     parser.add_argument("--model", type=str, choices=["cnn", "unet"], default="unet")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--use-class-weights", action="store_true")
+    parser.add_argument(
+        "--class-weights",
+        type=str,
+        default=None,
+        help='Optional comma-separated class weights, e.g. "0.66,0.50,2.05,27.0"',
+    )
+    parser.add_argument(
+        "--checkpoint-path",
+        type=Path,
+        default=Path("checkpoints") / "baseline_best.pt",
+        help="Path to save the best checkpoint.",
+    )
     parser.add_argument("--use-train-augmentations", action="store_true")
+    parser.add_argument(
+        "--log-every",
+        type=int,
+        default=50,
+        help="Print batch loss every N batches (train/val).",
+    )
     return parser.parse_args()
 
 
@@ -122,6 +151,9 @@ def update_iou_stats(
 
 def main() -> None:
     args = parse_args()
+    if args.class_weights is not None and not args.use_class_weights:
+        raise ValueError("--class-weights requires --use-class-weights")
+
     torch.manual_seed(args.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
@@ -129,6 +161,10 @@ def main() -> None:
     print("Model:", args.model)
     print("Use class weights:", args.use_class_weights)
     print("Use train augmentations:", args.use_train_augmentations)
+    print("Max train batches:", args.max_train_batches)
+    print("Max val batches:", args.max_val_batches)
+    print("Num workers:", args.num_workers)
+    print("Log every:", args.log_every)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Device:", device)
@@ -140,23 +176,46 @@ def main() -> None:
     )
     val_ds = AI4MarsSegmentationDataset(dataset_root=args.dataset_root, split="val")
 
-    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
-    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False)
+    train_loader = DataLoader(
+        train_ds,
+        batch_size=args.batch_size,
+        shuffle=True,
+        num_workers=args.num_workers,
+    )
+    val_loader = DataLoader(
+        val_ds,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=args.num_workers,
+    )
 
     print(f"Train samples: {len(train_ds)} | Val samples: {len(val_ds)}")
 
     model = build_model(args.model, args.num_classes).to(device)
     class_weights = None
     if args.use_class_weights:
-        class_weights = torch.tensor(FIXED_CLASS_WEIGHTS, dtype=torch.float32, device=device)
-        if len(class_weights) != args.num_classes:
+        if args.class_weights is not None:
+            try:
+                class_weights_values = [float(x.strip()) for x in args.class_weights.split(",")]
+            except ValueError as exc:
+                raise ValueError(
+                    "--class-weights must be a comma-separated list of numeric values, "
+                    'for example: "0.66,0.50,2.05,27.0"'
+                ) from exc
+            weights_source = "CLI (--class-weights)"
+        else:
+            class_weights_values = list(FIXED_CLASS_WEIGHTS)
+            weights_source = "FIXED_CLASS_WEIGHTS"
+
+        if len(class_weights_values) != args.num_classes:
             raise ValueError(
-                f"FIXED_CLASS_WEIGHTS expects {len(class_weights)} classes but got "
-                f"--num-classes={args.num_classes}"
+                f"Expected {args.num_classes} class weights but got "
+                f"{len(class_weights_values)} from {weights_source}"
             )
+        class_weights = torch.tensor(class_weights_values, dtype=torch.float32, device=device)
         class_weights_list = [round(x, 6) for x in class_weights.detach().cpu().tolist()]
         print("Class weights mode: enabled")
-        print("Using fixed class weights:", class_weights_list)
+        print(f"Using class weights from {weights_source}:", class_weights_list)
     else:
         print("Class weights mode: disabled (uniform CE)")
     if args.use_class_weights:
@@ -167,7 +226,7 @@ def main() -> None:
     best_epoch = -1
     best_mean_iou = -1.0
     best_iou_per_class = [0.0 for _ in range(args.num_classes)]
-    best_checkpoint_path = Path("checkpoints") / "baseline_best.pt"
+    best_checkpoint_path = Path(str(args.checkpoint_path).replace("\\", "/"))
     best_checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
 
     for epoch in range(args.epochs):
@@ -185,12 +244,13 @@ def main() -> None:
             optimizer.step()
 
             train_losses.append(loss.item())
-            print(
-                f"[epoch {epoch + 1}] train batch {batch_idx + 1} "
-                f"loss={loss.item():.4f}"
-            )
+            if args.log_every > 0 and ((batch_idx + 1) % args.log_every == 0 or batch_idx == 0):
+                print(
+                    f"[epoch {epoch + 1}] train batch {batch_idx + 1} "
+                    f"loss={loss.item():.4f}"
+                )
 
-            if (batch_idx + 1) >= args.max_train_batches:
+            if args.max_train_batches is not None and (batch_idx + 1) >= args.max_train_batches:
                 break
 
         model.eval()
@@ -222,12 +282,13 @@ def main() -> None:
                     target_pixel_counts[cls] += (valid_targets == cls).sum().item()
                     pred_pixel_counts[cls] += (valid_preds == cls).sum().item()
 
-                print(
-                    f"[epoch {epoch + 1}] val batch {batch_idx + 1} "
-                    f"loss={loss.item():.4f}"
-                )
+                if args.log_every > 0 and ((batch_idx + 1) % args.log_every == 0 or batch_idx == 0):
+                    print(
+                        f"[epoch {epoch + 1}] val batch {batch_idx + 1} "
+                        f"loss={loss.item():.4f}"
+                    )
 
-                if (batch_idx + 1) >= args.max_val_batches:
+                if args.max_val_batches is not None and (batch_idx + 1) >= args.max_val_batches:
                     break
 
         train_mean = sum(train_losses) / max(len(train_losses), 1)
