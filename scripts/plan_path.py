@@ -10,7 +10,13 @@ import torch
 
 from mrti.data.dataset import AI4MarsSegmentationDataset
 from train_baseline import build_model
-from build_cost_map import CLASS_COSTS, colorize_cost_map, mask_to_cost_map, to_uint8_image
+from build_cost_map import (
+    CLASS_COSTS,
+    calibrate_class_prediction,
+    colorize_cost_map,
+    mask_to_cost_map,
+    to_uint8_image,
+)
 
 LOCAL_PLANNING_MIN_ROW_RATIO = 0.55
 
@@ -24,6 +30,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sample-idx", type=int, default=0)
     parser.add_argument("--output-dir", type=Path, default=Path("outputs/path_plans"))
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--class3-threshold", type=float, default=None)
     return parser.parse_args()
 
 
@@ -147,7 +154,11 @@ def main() -> None:
 
     with torch.no_grad():
         logits = model(sample["image"].unsqueeze(0).to(device))
-    pred_mask = logits.argmax(dim=1).squeeze(0).detach().cpu().numpy().astype(np.int64)
+    pred_mask = calibrate_class_prediction(
+        logits=logits,
+        class_index=3,
+        threshold=args.class3_threshold,
+    ).squeeze(0).detach().cpu().numpy().astype(np.int64)
     cost_map = mask_to_cost_map(pred_mask)
 
     # Local planning mask: allow planning only in lower part of the image.
