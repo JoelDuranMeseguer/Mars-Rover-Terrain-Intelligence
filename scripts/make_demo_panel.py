@@ -1,6 +1,7 @@
 """Generate end-to-end demo panels for README/demo usage."""
 
 import argparse
+import csv
 from pathlib import Path
 
 import numpy as np
@@ -39,6 +40,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--path-thickness", type=int, default=3)
     parser.add_argument("--safety-radius", type=int, default=0)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--write-manifest", action="store_true")
     return parser.parse_args()
 
 
@@ -89,6 +91,7 @@ def main() -> None:
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     saved_count = 0
+    manifest_rows = []
 
     with torch.no_grad():
         for sample_idx in selected_indices:
@@ -128,7 +131,16 @@ def main() -> None:
             output_path = args.output_dir / f"{sample_idx:03d}_{sample['id']}_demo_panel.png"
             Image.fromarray(panel).save(output_path)
             saved_count += 1
+            manifest_rows.append({"sample_idx": sample_idx, "sample_id": sample["id"], "path_found": path is not None, "output_path": str(output_path)})
             print(f"saved={output_path}")
+
+    if args.write_manifest:
+        manifest_path = args.output_dir / "manifest.csv"
+        with manifest_path.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=["sample_idx", "sample_id", "path_found", "output_path"])
+            writer.writeheader()
+            writer.writerows(manifest_rows)
+        print(f"manifest={manifest_path}")
 
     print("-" * 72)
     print("Demo panel generation summary")
