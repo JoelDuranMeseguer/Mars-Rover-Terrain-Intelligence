@@ -52,6 +52,13 @@ def make_panel(
     return np.concatenate([image, separator, pred_rgb, separator, cost_rgb, separator, path_rgb], axis=1)
 
 
+
+
+def apply_planning_mask_visual(planning_rgb: np.ndarray, min_plan_row: int) -> np.ndarray:
+    out = planning_rgb.copy()
+    out[:min_plan_row, :] = np.array([45, 45, 45], dtype=np.uint8)
+    return out
+
 def build_sample_indices(sample_idx: int, sample_indices: list[int] | None, dataset_len: int) -> list[int]:
     raw_indices = sample_indices if sample_indices else [sample_idx]
     return [max(0, min(idx, dataset_len - 1)) for idx in raw_indices]
@@ -93,10 +100,10 @@ def main() -> None:
                 threshold=args.class3_threshold,
             ).squeeze(0).detach().cpu().numpy().astype(np.int64)
 
-            cost_map = mask_to_cost_map(pred_mask)
-            h, w = cost_map.shape
+            raw_cost_map = mask_to_cost_map(pred_mask)
+            h, w = raw_cost_map.shape
             min_plan_row = int(h * LOCAL_PLANNING_MIN_ROW_RATIO)
-            masked_cost_map = cost_map.copy()
+            masked_cost_map = raw_cost_map.copy()
             masked_cost_map[:min_plan_row, :] = CLASS_COSTS[255]
             planning_cost_map = inflate_obstacles_square(masked_cost_map, args.safety_radius)
 
@@ -112,8 +119,10 @@ def main() -> None:
 
             image_rgb = to_uint8_image(sample["image"])
             pred_rgb = colorize_pred_mask(pred_mask)
-            cost_rgb = colorize_cost_map(planning_cost_map)
-            path_rgb = draw_path_on_cost_map(cost_rgb, path, start, goal, path_thickness=args.path_thickness)
+            cost_rgb = colorize_cost_map(raw_cost_map)
+            planning_rgb = colorize_cost_map(planning_cost_map)
+            planning_rgb = apply_planning_mask_visual(planning_rgb, min_plan_row=min_plan_row)
+            path_rgb = draw_path_on_cost_map(planning_rgb, path, start, goal, path_thickness=args.path_thickness)
             panel = make_panel(image_rgb, pred_rgb, cost_rgb, path_rgb)
 
             output_path = args.output_dir / f"{sample_idx:03d}_{sample['id']}_demo_panel.png"
