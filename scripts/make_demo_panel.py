@@ -1,4 +1,4 @@
-"""Generate a single end-to-end demo panel for README/demo usage."""
+"""Generate end-to-end demo panels for README/demo usage."""
 
 import argparse
 from pathlib import Path
@@ -33,6 +33,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", type=str, choices=["cnn", "unet"], default="unet")
     parser.add_argument("--num-classes", type=int, default=4)
     parser.add_argument("--sample-idx", type=int, default=0)
+    parser.add_argument("--sample-indices", type=int, nargs="*", default=None)
     parser.add_argument("--class3-threshold", type=float, default=None)
     parser.add_argument("--output-dir", type=Path, default=Path("outputs/demo_panels"))
     parser.add_argument("--path-thickness", type=int, default=3)
@@ -49,6 +50,11 @@ def make_panel(
 ) -> np.ndarray:
     separator = np.full((image.shape[0], 8, 3), 255, dtype=np.uint8)
     return np.concatenate([image, separator, pred_rgb, separator, cost_rgb, separator, path_rgb], axis=1)
+
+
+def build_sample_indices(sample_idx: int, sample_indices: list[int] | None, dataset_len: int) -> list[int]:
+    raw_indices = sample_indices if sample_indices else [sample_idx]
+    return [max(0, min(idx, dataset_len - 1)) for idx in raw_indices]
 
 
 def main() -> None:
@@ -72,47 +78,57 @@ def main() -> None:
     model.eval()
 
     dataset = AI4MarsSegmentationDataset(dataset_root=args.dataset_root, split="val")
-    sample_idx = max(0, min(args.sample_idx, len(dataset) - 1))
-    sample = dataset[sample_idx]
-
-    with torch.no_grad():
-        logits = model(sample["image"].unsqueeze(0).to(device))
-    pred_mask = calibrate_class_prediction(
-        logits=logits,
-        class_index=3,
-        threshold=args.class3_threshold,
-    ).squeeze(0).detach().cpu().numpy().astype(np.int64)
-
-    cost_map = mask_to_cost_map(pred_mask)
-    h, w = cost_map.shape
-    min_plan_row = int(h * LOCAL_PLANNING_MIN_ROW_RATIO)
-    masked_cost_map = cost_map.copy()
-    masked_cost_map[:min_plan_row, :] = CLASS_COSTS[255]
-    planning_cost_map = inflate_obstacles_square(masked_cost_map, args.safety_radius)
-
-    raw_start = (max(h - 5, 0), w // 2)
-    raw_goal = (min(min_plan_row + 5, h - 1), w // 2)
-    start = find_nearest_traversable(planning_cost_map, raw_start)
-    goal = find_nearest_traversable(planning_cost_map, raw_goal)
-    if start is None or goal is None:
-        raise RuntimeError("Could not find traversable start/goal points in this sample.")
-
-    path = astar(planning_cost_map, start, goal)
-    if path is None:
-        print("No path found.")
-    else:
-        print(f"Path found with {len(path)} waypoints.")
-
-    image_rgb = to_uint8_image(sample["image"])
-    pred_rgb = colorize_pred_mask(pred_mask)
-    cost_rgb = colorize_cost_map(planning_cost_map)
-    path_rgb = draw_path_on_cost_map(cost_rgb, path, start, goal, path_thickness=args.path_thickness)
-    panel = make_panel(image_rgb, pred_rgb, cost_rgb, path_rgb)
+    selected_indices = build_sample_indices(args.sample_idx, args.sample_indices, len(dataset))
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = args.output_dir / f"{sample_idx:03d}_{sample['id']}_demo_panel.png"
-    Image.fromarray(panel).save(output_path)
-    print(f"saved={output_path}")
+    saved_count = 0
+
+    with torch.no_grad():
+        for sample_idx in selected_indices:
+            sample = dataset[sample_idx]
+            logits = model(sample["image"].unsqueeze(0).to(device))
+            pred_mask = calibrate_class_prediction(
+                logits=logits,
+                class_index=3,
+                threshold=args.class3_threshold,
+            ).squeeze(0).detach().cpu().numpy().astype(np.int64)
+
+            cost_map = mask_to_cost_map(pred_mask)
+            h, w = cost_map.shape
+            min_plan_row = int(h * LOCAL_PLANNING_MIN_ROW_RATIO)
+            masked_cost_map = cost_map.copy()
+            masked_cost_map[:min_plan_row, :] = CLASS_COSTS[255]
+            planning_cost_map = inflate_obstacles_square(masked_cost_map, args.safety_radius)
+
+            raw_start = (max(h - 5, 0), w // 2)
+            raw_goal = (min(min_plan_row + 5, h - 1), w // 2)
+            start = find_nearest_traversable(planning_cost_map, raw_start)
+            goal = find_nearest_traversable(planning_cost_map, raw_goal)
+            if start is None or goal is None:
+                print(f"skipped sample_idx={sample_idx}: no traversable start/goal")
+                continue
+
+            path = astar(planning_cost_map, start, goal)
+
+            image_rgb = to_uint8_image(sample["image"])
+            pred_rgb = colorize_pred_mask(pred_mask)
+            cost_rgb = colorize_cost_map(planning_cost_map)
+            path_rgb = draw_path_on_cost_map(cost_rgb, path, start, goal, path_thickness=args.path_thickness)
+            panel = make_panel(image_rgb, pred_rgb, cost_rgb, path_rgb)
+
+            output_path = args.output_dir / f"{sample_idx:03d}_{sample['id']}_demo_panel.png"
+            Image.fromarray(panel).save(output_path)
+            saved_count += 1
+            print(f"saved={output_path}")
+
+    print("-" * 72)
+    print("Demo panel generation summary")
+    print(f"saved_panels: {saved_count}")
+    print(f"output_dir: {args.output_dir}")
+    print(f"checkpoint: {args.checkpoint}")
+    print(f"class3_threshold: {args.class3_threshold}")
+    print(f"path_thickness: {args.path_thickness}")
+    print(f"safety_radius: {args.safety_radius}")
 
 
 if __name__ == "__main__":
