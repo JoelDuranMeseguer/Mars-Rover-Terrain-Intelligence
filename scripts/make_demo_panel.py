@@ -22,6 +22,7 @@ from plan_path import (
     astar,
     draw_path_on_cost_map,
     find_nearest_traversable,
+    inflate_obstacles_square,
 )
 
 
@@ -34,6 +35,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sample-idx", type=int, default=0)
     parser.add_argument("--class3-threshold", type=float, default=None)
     parser.add_argument("--output-dir", type=Path, default=Path("outputs/demo_panels"))
+    parser.add_argument("--path-thickness", type=int, default=3)
+    parser.add_argument("--safety-radius", type=int, default=0)
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
 
@@ -85,15 +88,16 @@ def main() -> None:
     min_plan_row = int(h * LOCAL_PLANNING_MIN_ROW_RATIO)
     masked_cost_map = cost_map.copy()
     masked_cost_map[:min_plan_row, :] = CLASS_COSTS[255]
+    planning_cost_map = inflate_obstacles_square(masked_cost_map, args.safety_radius)
 
     raw_start = (max(h - 5, 0), w // 2)
     raw_goal = (min(min_plan_row + 5, h - 1), w // 2)
-    start = find_nearest_traversable(masked_cost_map, raw_start)
-    goal = find_nearest_traversable(masked_cost_map, raw_goal)
+    start = find_nearest_traversable(planning_cost_map, raw_start)
+    goal = find_nearest_traversable(planning_cost_map, raw_goal)
     if start is None or goal is None:
         raise RuntimeError("Could not find traversable start/goal points in this sample.")
 
-    path = astar(masked_cost_map, start, goal)
+    path = astar(planning_cost_map, start, goal)
     if path is None:
         print("No path found.")
     else:
@@ -101,8 +105,8 @@ def main() -> None:
 
     image_rgb = to_uint8_image(sample["image"])
     pred_rgb = colorize_pred_mask(pred_mask)
-    cost_rgb = colorize_cost_map(masked_cost_map)
-    path_rgb = draw_path_on_cost_map(cost_rgb, path, start, goal)
+    cost_rgb = colorize_cost_map(planning_cost_map)
+    path_rgb = draw_path_on_cost_map(cost_rgb, path, start, goal, path_thickness=args.path_thickness)
     panel = make_panel(image_rgb, pred_rgb, cost_rgb, path_rgb)
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
