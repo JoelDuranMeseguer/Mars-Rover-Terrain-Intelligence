@@ -5,7 +5,7 @@ import csv
 from pathlib import Path
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 import torch
 
 from mrti.data.dataset import AI4MarsSegmentationDataset
@@ -41,6 +41,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--safety-radius", type=int, default=0)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--write-manifest", action="store_true")
+    parser.add_argument("--readme-mode", action="store_true")
+    parser.add_argument("--add-titles", action="store_true")
+    parser.add_argument("--resize-width", type=int, default=None)
     return parser.parse_args()
 
 
@@ -49,9 +52,38 @@ def make_panel(
     pred_rgb: np.ndarray,
     cost_rgb: np.ndarray,
     path_rgb: np.ndarray,
+    separator_width: int = 8,
 ) -> np.ndarray:
-    separator = np.full((image.shape[0], 8, 3), 255, dtype=np.uint8)
+    separator = np.full((image.shape[0], separator_width, 3), 255, dtype=np.uint8)
     return np.concatenate([image, separator, pred_rgb, separator, cost_rgb, separator, path_rgb], axis=1)
+
+
+def add_titles_to_panel(panel: np.ndarray, titles: list[str], separator_width: int, title_height: int = 26) -> np.ndarray:
+    panel_img = Image.fromarray(panel)
+    width, height = panel_img.size
+    header = Image.new("RGB", (width, title_height), color=(245, 245, 245))
+    draw = ImageDraw.Draw(header)
+
+    col_width = (width - 3 * separator_width) // 4
+    for i, title in enumerate(titles):
+        x0 = i * (col_width + separator_width)
+        draw.text((x0 + 6, 6), title, fill=(20, 20, 20))
+
+    out = Image.new("RGB", (width, height + title_height), color=(255, 255, 255))
+    out.paste(header, (0, 0))
+    out.paste(panel_img, (0, title_height))
+    return np.array(out)
+
+
+def resize_panel_width(panel: np.ndarray, target_width: int | None) -> np.ndarray:
+    if target_width is None or target_width <= 0:
+        return panel
+    image = Image.fromarray(panel)
+    w, h = image.size
+    if w == target_width:
+        return panel
+    new_h = max(1, int(round(h * (target_width / w))))
+    return np.array(image.resize((target_width, new_h), resample=Image.BILINEAR))
 
 
 
@@ -126,9 +158,24 @@ def main() -> None:
             planning_rgb = colorize_cost_map(planning_cost_map)
             planning_rgb = apply_planning_mask_visual(planning_rgb, min_plan_row=min_plan_row)
             path_rgb = draw_path_on_cost_map(planning_rgb, path, start, goal, path_thickness=args.path_thickness)
-            panel = make_panel(image_rgb, pred_rgb, cost_rgb, path_rgb)
+            separator_width = 4 if args.readme_mode else 8
+            panel = make_panel(image_rgb, pred_rgb, cost_rgb, path_rgb, separator_width=separator_width)
 
-            output_path = args.output_dir / f"{sample_idx:03d}_{sample['id']}_demo_panel.png"
+            should_add_titles = args.add_titles or args.readme_mode
+            if should_add_titles:
+                panel = add_titles_to_panel(
+                    panel,
+                    titles=["Rover image", "Predicted terrain", "Cost map", "Local A* path"],
+                    separator_width=separator_width,
+                )
+
+            panel = resize_panel_width(panel, args.resize_width)
+
+            if args.readme_mode:
+                filename = f"readme_demo_panel_{sample_idx:03d}_{sample['id']}.png"
+            else:
+                filename = f"{sample_idx:03d}_{sample['id']}_demo_panel.png"
+            output_path = args.output_dir / filename
             Image.fromarray(panel).save(output_path)
             saved_count += 1
             manifest_rows.append({"sample_idx": sample_idx, "sample_id": sample["id"], "path_found": path is not None, "output_path": str(output_path)})
