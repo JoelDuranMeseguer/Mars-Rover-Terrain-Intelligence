@@ -30,8 +30,29 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-samples", type=int, default=4)
     parser.add_argument("--output-dir", type=Path, default=Path("outputs/cost_maps"))
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--class3-threshold", type=float, default=None)
     return parser.parse_args()
 
+
+
+
+def calibrate_class_prediction(
+    logits: torch.Tensor,
+    class_index: int = 3,
+    threshold: float | None = None,
+) -> torch.Tensor:
+    if threshold is None:
+        return logits.argmax(dim=1)
+
+    probs = torch.softmax(logits, dim=1)
+    top_probs, top_indices = probs.topk(k=2, dim=1)
+    preds = top_indices[:, 0].clone()
+
+    pred_is_class = preds == class_index
+    low_conf = top_probs[:, 0] < threshold
+    replace = pred_is_class & low_conf
+    preds[replace] = top_indices[:, 1][replace]
+    return preds
 
 def to_uint8_image(image_tensor: torch.Tensor) -> np.ndarray:
     image = image_tensor.detach().cpu().permute(1, 2, 0).numpy()
@@ -124,7 +145,11 @@ def main() -> None:
             sample_id = sample["id"]
 
             logits = model(image.unsqueeze(0).to(device))
-            pred_mask = logits.argmax(dim=1).squeeze(0).detach().cpu().numpy().astype(np.int64)
+            pred_mask = calibrate_class_prediction(
+                logits=logits,
+                class_index=3,
+                threshold=args.class3_threshold,
+            ).squeeze(0).detach().cpu().numpy().astype(np.int64)
 
             cost_map = mask_to_cost_map(pred_mask)
 

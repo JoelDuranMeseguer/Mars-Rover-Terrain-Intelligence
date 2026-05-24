@@ -122,6 +122,30 @@ Default output folders:
 - `outputs/cost_maps/`
 - `outputs/path_plans/`
 
+### 4) README-friendly end-to-end panel (recommended for GitHub)
+
+```bash
+python scripts/make_demo_panel.py \
+  --checkpoint checkpoints/baseline_c3_mid_final.pt \
+  --model unet \
+  --sample-idx 0 \
+  --class3-threshold 0.6 \
+  --path-thickness 5 \
+  --safety-radius 1 \
+  --readme-mode \
+  --output-dir docs/assets
+```
+
+Recommended filename for GitHub embedding: `docs/assets/readme_demo_panel.png`.
+
+Use this reference in `README.md`:
+
+```markdown
+![End-to-end demo: rover image, segmentation, cost map, and local A* path](docs/assets/readme_demo_panel.png)
+```
+
+This remains a **local path recommendation** demo, not autonomous navigation.
+
 ## Current limitations
 
 This is still an MVP, so a few limitations matter:
