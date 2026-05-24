@@ -291,7 +291,6 @@ def main() -> None:
             logits = model(images)
             loss = criterion(logits, masks)
             loss.backward()
-            loss.backward()
             if args.grad_clip > 0:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
             optimizer.step()
