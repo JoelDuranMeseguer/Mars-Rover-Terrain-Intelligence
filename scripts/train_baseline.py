@@ -65,6 +65,12 @@ def parse_args() -> argparse.Namespace:
         help="Path to a checkpoint to resume training from "
              "(loads model + optimizer + epoch + best_iou).",
     )
+    parser.add_argument(
+        "--grad-clip",
+        type=float,
+        default=1.0,
+        help="Max grad norm for gradient clipping. Set to 0 to disable.",
+    )
     return parser.parse_args()
 
 
@@ -230,6 +236,13 @@ def main() -> None:
     else:
         criterion = nn.CrossEntropyLoss(ignore_index=255)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer,
+        T_max=args.epochs,
+        eta_min=1e-5,
+    )
+    
     best_epoch = -1
     best_mean_iou = -1.0
     best_iou_per_class = [0.0 for _ in range(args.num_classes)]
@@ -248,6 +261,9 @@ def main() -> None:
         model.load_state_dict(ckpt["model_state_dict"])
         if "optimizer_state_dict" in ckpt:
             optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+
+        if "scheduler_state_dict" in ckpt:  
+            scheduler.load_state_dict(ckpt["scheduler_state_dict"])
         start_epoch = int(ckpt.get("epoch", 0))
         best_epoch = int(ckpt.get("best_epoch", -1))
         best_mean_iou = float(ckpt.get("best_mean_iou", -1.0))
@@ -275,6 +291,9 @@ def main() -> None:
             logits = model(images)
             loss = criterion(logits, masks)
             loss.backward()
+            loss.backward()
+            if args.grad_clip > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
             optimizer.step()
 
             train_losses.append(loss.item())
@@ -368,11 +387,16 @@ def main() -> None:
                 f"class_{cls} target_pixels={int(target_pixel_counts[cls].item())} "
                 f"predicted_pixels={int(pred_pixel_counts[cls].item())}"
             )
+
+        scheduler.step()
+        current_lr = optimizer.param_groups[0]["lr"]
+        print(f"[epoch {epoch + 1}] lr after scheduler step = {current_lr:.6f}")
         torch.save(
             {
                 "epoch": epoch + 1,
                 "model_state_dict": model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
+                "scheduler_state_dict": scheduler.state_dict(),
                 "model_name": args.model,
                 "num_classes": args.num_classes,
                 "use_class_weights": args.use_class_weights,
