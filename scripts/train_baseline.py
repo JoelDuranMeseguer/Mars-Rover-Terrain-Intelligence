@@ -58,6 +58,13 @@ def parse_args() -> argparse.Namespace:
         default=50,
         help="Print batch loss every N batches (train/val).",
     )
+    parser.add_argument(
+        "--resume-from",
+        type=Path,
+        default=None,
+        help="Path to a checkpoint to resume training from "
+             "(loads model + optimizer + epoch + best_iou).",
+    )
     return parser.parse_args()
 
 
@@ -228,8 +235,35 @@ def main() -> None:
     best_iou_per_class = [0.0 for _ in range(args.num_classes)]
     best_checkpoint_path = Path(str(args.checkpoint_path).replace("\\", "/"))
     best_checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
-
-    for epoch in range(args.epochs):
+    last_checkpoint_path = best_checkpoint_path.parent / (
+        best_checkpoint_path.stem + "_last.pt"
+    )
+    start_epoch = 0
+    if args.resume_from is not None:
+        if not args.resume_from.exists():
+            raise FileNotFoundError(
+                f"--resume-from checkpoint not found: {args.resume_from}"
+            )
+        ckpt = torch.load(args.resume_from, map_location=device)
+        model.load_state_dict(ckpt["model_state_dict"])
+        if "optimizer_state_dict" in ckpt:
+            optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+        start_epoch = int(ckpt.get("epoch", 0))
+        best_epoch = int(ckpt.get("best_epoch", -1))
+        best_mean_iou = float(ckpt.get("best_mean_iou", -1.0))
+        best_iou_per_class = list(
+            ckpt.get("best_iou_per_class", [0.0] * args.num_classes)
+        )
+        print(
+            f"Resumed from {args.resume_from}: start_epoch={start_epoch}, "
+            f"best_epoch={best_epoch}, best_mean_iou={best_mean_iou:.4f}"
+        )
+        if start_epoch >= args.epochs:
+            print(
+                f"Warning: start_epoch ({start_epoch}) >= args.epochs ({args.epochs}). "
+                "Nothing to train. Increase --epochs."
+            )
+    for epoch in range(start_epoch, args.epochs):
         model.train()
         train_losses = []
 
@@ -315,8 +349,12 @@ def main() -> None:
                 {
                     "epoch": best_epoch,
                     "model_state_dict": model.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "best_epoch": best_epoch,
                     "best_mean_iou": best_mean_iou,
+                    "best_iou_per_class": best_iou_per_class,
                     "model_name": args.model,
+                    "num_classes": args.num_classes,
                     "use_class_weights": args.use_class_weights,
                 },
                 best_checkpoint_path,
@@ -330,6 +368,21 @@ def main() -> None:
                 f"class_{cls} target_pixels={int(target_pixel_counts[cls].item())} "
                 f"predicted_pixels={int(pred_pixel_counts[cls].item())}"
             )
+        torch.save(
+            {
+                "epoch": epoch + 1,
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "model_name": args.model,
+                "num_classes": args.num_classes,
+                "use_class_weights": args.use_class_weights,
+                "best_epoch": best_epoch,
+                "best_mean_iou": best_mean_iou,
+                "best_iou_per_class": best_iou_per_class,
+            },
+            last_checkpoint_path,
+        )
+        print(f"Saved last checkpoint to {last_checkpoint_path} (epoch={epoch + 1})")
 
     best_iou_text = ", ".join(
         [f"class_{cls}_iou={best_iou_per_class[cls]:.4f}" for cls in range(args.num_classes)]

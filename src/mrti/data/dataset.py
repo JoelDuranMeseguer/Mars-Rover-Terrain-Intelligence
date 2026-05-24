@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Callable
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageEnhance
 import torch
 from torch.utils.data import Dataset
 
@@ -137,9 +137,47 @@ class AI4MarsSegmentationDataset(Dataset):
         image: Image.Image,
         mask: Image.Image,
     ) -> tuple[Image.Image, Image.Image]:
+        # 1) Horizontal flip (terrain has left/right symmetry).
         if torch.rand(1).item() < 0.5:
             image = image.transpose(Image.FLIP_LEFT_RIGHT)
             mask = mask.transpose(Image.FLIP_LEFT_RIGHT)
+
+        # 2) Random crop + resize back to original size.
+        #    Scale in [0.7, 1.0] of the original side length.
+        if torch.rand(1).item() < 0.5:
+            w, h = image.size
+            scale = 0.7 + 0.3 * torch.rand(1).item()
+            new_w = max(1, int(w * scale))
+            new_h = max(1, int(h * scale))
+            left = (
+                int(torch.randint(0, w - new_w + 1, (1,)).item())
+                if w > new_w
+                else 0
+            )
+            top = (
+                int(torch.randint(0, h - new_h + 1, (1,)).item())
+                if h > new_h
+                else 0
+            )
+            right = left + new_w
+            bottom = top + new_h
+
+            image = image.crop((left, top, right, bottom)).resize(
+                (w, h), Image.BILINEAR
+            )
+            # NEAREST is required for masks to avoid creating phantom class ids
+            # via interpolation between class values.
+            mask = mask.crop((left, top, right, bottom)).resize(
+                (w, h), Image.NEAREST
+            )
+
+        # 3) Brightness / contrast jitter (±10%), image only.
+        if torch.rand(1).item() < 0.5:
+            brightness_factor = 0.9 + 0.2 * torch.rand(1).item()  # [0.9, 1.1]
+            contrast_factor = 0.9 + 0.2 * torch.rand(1).item()    # [0.9, 1.1]
+            image = ImageEnhance.Brightness(image).enhance(brightness_factor)
+            image = ImageEnhance.Contrast(image).enhance(contrast_factor)
+
         return image, mask
 
     def _image_to_tensor(self, image: Image.Image) -> torch.Tensor:
